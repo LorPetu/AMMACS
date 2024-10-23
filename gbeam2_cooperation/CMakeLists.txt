@@ -21,6 +21,7 @@ find_package(ament_cmake REQUIRED)
  "tf2_ros"
  "tf2_geometry_msgs"
  "gbeam2_library"
+ "Eigen3"
 
 )
 # Loop over each dependancy
@@ -33,6 +34,13 @@ endforeach(DEP IN LISTS DEPENDANCIES)
 add_executable(cooperation_manager src/cooperation_manager.cpp)
 
 ament_target_dependencies(cooperation_manager PUBLIC ${DEPENDANCIES})
+
+# Add Spectra (Header-only library, specify the include path manually)
+set(SPECTRA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../spectra/include")
+include_directories(
+  ${EIGEN3_INCLUDE_DIRS}
+  ${SPECTRA_DIR}
+)
 
 target_include_directories(cooperation_manager PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

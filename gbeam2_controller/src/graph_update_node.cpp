@@ -75,6 +75,7 @@ public:
         this->declare_parameter<double>("node_bound_dist",0.0);
         this->declare_parameter<double>("obstacle_margin",0.0);
         this->declare_parameter<double>("safe_dist",0.0);
+        this->declare_parameter<double>("max_lenght_edge",0.0);
         
         //Exploration limits
         this->declare_parameter<double>("limit_xi",0.0);
@@ -92,6 +93,7 @@ public:
         node_bound_dist = this->get_parameter("node_bound_dist").get_parameter_value().get<double>();
         obstacle_margin = this->get_parameter("obstacle_margin").get_parameter_value().get<double>();
         safe_dist = this->get_parameter("safe_dist").get_parameter_value().get<double>();
+        max_lenght_edge = this->get_parameter("max_lenght_edge").get_parameter_value().get<double>();
 
         limit_xi = this->get_parameter("limit_xi").get_parameter_value().get<double>();
         limit_xs = this->get_parameter("limit_xs").get_parameter_value().get<double>();
@@ -132,6 +134,7 @@ private:
     double node_bound_dist;
     double obstacle_margin;
     double safe_dist;
+    double max_lenght_edge;
 
     bool received_ext_nodes;
 
@@ -313,17 +316,21 @@ private:
                 gbeam2_interfaces::msg::Vertex& node_j = graph.nodes[inReachableId[j]]; 
                 gbeam2_interfaces::msg::GraphEdge edge = computeEdge(node_i, node_j, node_bound_dist);
                 edge.id = graph.edges.size();
-                if(isInsideReachable(polyGlobal, node_i) && isInsideReachable(polyGlobal, node_j))
-                edge.is_walkable = true;  // if both vertices are inside reachable poly, then the edge is walkable
-                graph.edges.push_back(edge);
+                if(!node_i.is_obstacle && !node_j.is_obstacle && edge.length < max_lenght_edge){
+                    if(isInsideReachable(polyGlobal, node_i) && isInsideReachable(polyGlobal, node_j))
+                    edge.is_walkable = true;  // if both vertices are inside reachable poly, then the edge is walkable
+                    graph.edges.push_back(edge);
 
-                //update adjacency matrix
-                new_adj_matrix[inReachableId[i]][inReachableId[j]] = edge.id;
-                new_adj_matrix[inReachableId[j]][inReachableId[i]] = edge.id;
-                node_i.neighbors.push_back(node_j.id);
-                node_j.neighbors.push_back(node_i.id);
+                    //update adjacency matrix
+                    new_adj_matrix[inReachableId[i]][inReachableId[j]] = edge.id;
+                    new_adj_matrix[inReachableId[j]][inReachableId[i]] = edge.id;
+                    graph.nodes[inReachableId[i]].neighbors.push_back(node_j.id);
+                    graph.nodes[inReachableId[j]].neighbors.push_back(node_i.id);
 
-                is_changed = true;
+                    is_changed = true;
+
+                }
+                
             }
             else  // if edge is present, check if it is walkable
             {
