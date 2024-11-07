@@ -145,9 +145,6 @@ public:
     start_frontiers_service_ = this->create_service<std_srvs::srv::SetBool>(
         "start_frontier",std::bind(&CooperationNode::startFrontier,this, std::placeholders::_1, std::placeholders::_2));
 
-    point_cloud_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-        "merged_obstacles",1);
-
     fiedler_vector_pub_ = this->create_publisher<gbeam2_interfaces::msg::FieldlerInfo>("fieldler_vector",1);
 
     //cluster_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&CooperationNode::CreateClusterGraph, this));
@@ -204,6 +201,12 @@ private:
   int last_updated_edge;
   bool start_frontier = false;
 
+  //
+  int updates_iter = 0;
+  bool eval_updates = false;
+  std::vector<gbeam2_interfaces::msg::Vertex> first_batch;
+  std::vector<gbeam2_interfaces::msg::Vertex> second_batch;
+
   //Frontiers variables
   int N_my_frontiers = 0;
   std::pair<gbeam2_interfaces::msg::Vertex, gbeam2_interfaces::msg::Vertex> obs_min_pair;
@@ -243,7 +246,6 @@ private:
   rclcpp::Publisher<gbeam2_interfaces::msg::FrontierStampedArray>::SharedPtr frontier_pub_;
   rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
   rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr assigned_graph_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_publisher_;
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  start_frontiers_service_;
   rclcpp::Publisher<gbeam2_interfaces::msg::FieldlerInfo>::SharedPtr fiedler_vector_pub_;
@@ -253,188 +255,124 @@ private:
   double deg_90 = M_PI / 2.0;
   double deg_30 = M_PI / 6.0;
 
-
-  bool checkIntersection(gbeam2_interfaces::msg::Vertex p1,gbeam2_interfaces::msg::Vertex p2,gbeam2_interfaces::msg::Vertex p3,gbeam2_interfaces::msg::Vertex p4){
-      // Check it there's an intersection between two segment: 
-      // p1 - rec_pos: the segment between the 2 robot
-      // p3   - p4:    the segment between the two obstacles boundary vertex.  
-
-      double t = ((p1.x -p2.x)*(p3.y - p4.y) - (p1.y - p2.y)*(p3.x - p4.x)==0) ? -1 : 
-                  ((p1.x - p3.x)*(p3.y - p4.y) - (p1.y - p3.y)*(p3.x - p4.x))
-                / ((p1.x -p2.x)*(p3.y - p4.y) - (p1.y - p2.y)*(p3.x - p4.x));
-
-      double u = ((p1.x - p2.x)*(p3.y-p4.y) - (p1.y-p2.y)*(p3.x-p4.x)==0) ? -1 : 
-                -((p1.x - p2.x)*(p1.y - p3.y) - (p1.y-p2.y)*(p1.x - p3.x))
-                / ((p1.x - p2.x)*(p3.y-p4.y) - (p1.y-p2.y)*(p3.x-p4.x));
-
-      return (t>=0.0 && t<=1.0 && u>=0.0 && u<=1.0) ? true : false;
-
-  }
-
-  bool checkIntersection(gbeam2_interfaces::msg::Vertex p1,geometry_msgs::msg::Point p2,gbeam2_interfaces::msg::Vertex p3,gbeam2_interfaces::msg::Vertex p4){
-      // Check it there's an intersection between two segment: 
-      // p1 - rec_pos: the segment between the 2 robot
-      // p3   - p4:    the segment between the two obstacles boundary vertex.  
-
-      double t = ((p1.x -p2.x)*(p3.y - p4.y) - (p1.y - p2.y)*(p3.x - p4.x)==0) ? -1 : 
-                  ((p1.x - p3.x)*(p3.y - p4.y) - (p1.y - p3.y)*(p3.x - p4.x))
-                / ((p1.x -p2.x)*(p3.y - p4.y) - (p1.y - p2.y)*(p3.x - p4.x));
-
-      double u = ((p1.x - p2.x)*(p3.y-p4.y) - (p1.y-p2.y)*(p3.x-p4.x)==0) ? -1 : 
-                -((p1.x - p2.x)*(p1.y - p3.y) - (p1.y-p2.y)*(p1.x - p3.x))
-                / ((p1.x - p2.x)*(p3.y-p4.y) - (p1.y-p2.y)*(p3.x-p4.x));
-
-      return (t>=0.0 && t<=1.0 && u>=0.0 && u<=1.0) ? true : false;
-
-  }
-
-  bool checkIntersection(geometry_msgs::msg::Point p1,geometry_msgs::msg::Point p2,gbeam2_interfaces::msg::Vertex p3,gbeam2_interfaces::msg::Vertex p4){
-    // Check it there's an intersection between two segment: 
-    // p1 - rec_pos: the segment between the 2 robot
-    // p3   - p4:    the segment between the two obstacles boundary vertex.  
-
-    double t = ((p1.x -p2.x)*(p3.y - p4.y) - (p1.y - p2.y)*(p3.x - p4.x)==0) ? -1 : 
-                ((p1.x - p3.x)*(p3.y - p4.y) - (p1.y - p3.y)*(p3.x - p4.x))
-              / ((p1.x -p2.x)*(p3.y - p4.y) - (p1.y - p2.y)*(p3.x - p4.x));
-
-    double u = ((p1.x - p2.x)*(p3.y-p4.y) - (p1.y-p2.y)*(p3.x-p4.x)==0) ? -1 : 
-              -((p1.x - p2.x)*(p1.y - p3.y) - (p1.y-p2.y)*(p1.x - p3.x))
-              / ((p1.x - p2.x)*(p3.y-p4.y) - (p1.y-p2.y)*(p3.x-p4.x));
-
-    return (t>=0.0 && t<=1.0 && u>=0.0 && u<=1.0) ? true : false;
-
-  }
-
-  std::pair<double, bool> sideOfLine(geometry_msgs::msg::Point lineStart, geometry_msgs::msg::Point lineEnd, gbeam2_interfaces::msg::Vertex point) {
-      // 1. Compute the cross product to determine which side of the main line the point is on.
-      double cross_product = (lineEnd.x - lineStart.x) * (point.y - lineStart.y) - 
-                            (lineEnd.y - lineStart.y) * (point.x - lineStart.x);
-
-      // The value will be positive if the point is on one side, negative if on the other.
-      double value = cross_product;
-
-      // 2. Check if the point is within the perpendicular bounds defined by the start and end points.
-      // This can be done by projecting the point onto the main line, and seeing if the projected point lies between the start and end.
-
-      // Vector from lineStart to lineEnd
-      double dx = lineEnd.x - lineStart.x;
-      double dy = lineEnd.y - lineStart.y;
-
-      // Vector from lineStart to the point
-      double px = point.x - lineStart.x;
-      double py = point.y - lineStart.y;
-
-      // Project the point onto the line (calculate the projection scalar)
-      double dot_product = px * dx + py * dy;
-      double line_length_squared = dx * dx + dy * dy;
-      double projection = dot_product / line_length_squared;
-
-      // Check if the projection is between 0 and 1 (i.e., the point is between lineStart and lineEnd in the direction of the line)
-      bool is_inside = (projection >= 0 && projection <= 1);
-
-      return std::make_pair(value, is_inside);
-  }
-
-  std::pair<double, bool> sideOfLine(gbeam2_interfaces::msg::Vertex lineStart, gbeam2_interfaces::msg::Vertex lineEnd, gbeam2_interfaces::msg::Vertex point) {
-    // 1. Compute the cross product to determine which side of the main line the point is on.
-    double cross_product = (lineEnd.x - lineStart.x) * (point.y - lineStart.y) - 
-                           (lineEnd.y - lineStart.y) * (point.x - lineStart.x);
-
-    // The value will be positive if the point is on one side, negative if on the other.
-    double value = cross_product;
-
-    // 2. Check if the point is within the perpendicular bounds defined by the start and end points.
-    // This can be done by projecting the point onto the main line, and seeing if the projected point lies between the start and end.
-
-    // Vector from lineStart to lineEnd
-    double dx = lineEnd.x - lineStart.x;
-    double dy = lineEnd.y - lineStart.y;
-
-    // Vector from lineStart to the point
-    double px = point.x - lineStart.x;
-    double py = point.y - lineStart.y;
-
-    // Project the point onto the line (calculate the projection scalar)
-    double dot_product = px * dx + py * dy;
-    double line_length_squared = dx * dx + dy * dy;
-    double projection = dot_product / line_length_squared;
-
-    // Check if the projection is between 0 and 1 (i.e., the point is between lineStart and lineEnd in the direction of the line)
-    bool is_inside = (projection >= 0 && projection <= 1);
-
-    return std::make_pair(value, is_inside);
-}
-
-  std::pair<double, bool> sideOfLine(gbeam2_interfaces::msg::Vertex lineStart,  geometry_msgs::msg::Point lineEnd, gbeam2_interfaces::msg::Vertex point) {
-    // 1. Compute the cross product to determine which side of the main line the point is on.
-    double cross_product = (lineEnd.x - lineStart.x) * (point.y - lineStart.y) - 
-                           (lineEnd.y - lineStart.y) * (point.x - lineStart.x);
-
-    // The value will be positive if the point is on one side, negative if on the other.
-    double value = cross_product;
-
-    // 2. Check if the point is within the perpendicular bounds defined by the start and end points.
-    // This can be done by projecting the point onto the main line, and seeing if the projected point lies between the start and end.
-
-    // Vector from lineStart to lineEnd
-    double dx = lineEnd.x - lineStart.x;
-    double dy = lineEnd.y - lineStart.y;
-
-    // Vector from lineStart to the point
-    double px = point.x - lineStart.x;
-    double py = point.y - lineStart.y;
-
-    // Project the point onto the line (calculate the projection scalar)
-    double dot_product = px * dx + py * dy;
-    double line_length_squared = dx * dx + dy * dy;
-    double projection = dot_product / line_length_squared;
-
-    // Check if the projection is between 0 and 1 (i.e., the point is between lineStart and lineEnd in the direction of the line)
-    bool is_inside = (projection >= 0 && projection <= 1);
-
-    return std::make_pair(value, is_inside);
-}
-
-
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom_ptr)
   {
       robot_odom_ = *odom_ptr;
       //RCLCPP_INFO(this->get_logger(),"odom received: x:%f y:%f",robot_odom_.pose.pose.position.x,robot_odom_.pose.pose.position.y);
   }
+  
+  gbeam2_interfaces::msg::Graph compareUpdates(
+        const std::shared_ptr<const gbeam2_interfaces::msg::Graph>& current_graph,
+        const std::shared_ptr<const gbeam2_interfaces::msg::Graph>& previous_graph)
+    {
+        gbeam2_interfaces::msg::Graph result;
+        int last_node_index = previous_graph->nodes.size();
+        int last_edge_index = previous_graph->edges.size();
+
+        // Reserve space for potential changes (this is a rough estimate)
+        result.nodes.reserve(current_graph->nodes.size() - last_node_index);
+        result.edges.reserve(current_graph->edges.size() - last_edge_index);
+
+        // Check for modifications in existing NODES
+        for (int i = 0; i < last_node_index; ++i) {
+            if (hasVertexChanged(current_graph->nodes[i], previous_graph->nodes[i])) {
+                result.nodes.push_back(current_graph->nodes[i]);
+            }
+        }
+
+        // Add new nodes
+        result.nodes.insert(
+            result.nodes.end(),
+            std::make_move_iterator(current_graph->nodes.begin() + last_node_index),
+            std::make_move_iterator(current_graph->nodes.end())
+        );
+
+        // Check for modifications in existing EDGES
+        for (int i = 0; i < last_edge_index; ++i) {
+            if (hasEdgeChanged(current_graph->edges[i], previous_graph->edges[i])) {
+                result.edges.push_back(current_graph->edges[i]);
+            }
+        }
+
+        // Add new edges
+        result.edges.insert(
+            result.edges.end(),
+            std::make_move_iterator(current_graph->edges.begin() + last_edge_index),
+            std::make_move_iterator(current_graph->edges.end())
+        );
+
+        result.adj_matrix = current_graph->adj_matrix;
+        result.robot_id = current_graph->robot_id;
+
+
+        return result;
+    }
 
   void mergedGraphCallback(const std::shared_ptr<gbeam2_interfaces::msg::Graph> graph_received){
-  
-
-    if(graph_received->robot_id!=name_space_id){
+    
+    bool new_nodes=false;
      
-      int req_robot_id = graph_received->robot_id;
-      last_updated_node = (stored_Graph[req_robot_id]->nodes.empty()) ? -1 : stored_Graph[req_robot_id]->nodes.back().id;
-      last_updated_edge = (stored_Graph[req_robot_id]->edges.empty()) ? -1 : stored_Graph[req_robot_id]->edges.back().id;
+    int req_robot_id = graph_received->robot_id;
+    last_updated_node = (stored_Graph[req_robot_id]->nodes.empty()) ? -1 : stored_Graph[req_robot_id]->nodes.back().id;
+    last_updated_edge = (stored_Graph[req_robot_id]->edges.empty()) ? -1 : stored_Graph[req_robot_id]->edges.back().id;
 
-      for(gbeam2_interfaces::msg::Vertex node: graph_received->nodes){
+    for(gbeam2_interfaces::msg::Vertex node: graph_received->nodes){
 
-        if(node.id<last_updated_node){
-          stored_Graph[req_robot_id]->nodes[node.id]=node;          
-        }
-        else{
-          stored_Graph[req_robot_id]->nodes.push_back(node);
-        }
-
+      if(node.id<last_updated_node){
+        //update old ones
+        stored_Graph[req_robot_id]->nodes[node.id]=node;          
       }
+      else{
+        // adding new nodes
 
-      for(gbeam2_interfaces::msg::GraphEdge edge : graph_received->edges){
+        RCLCPP_INFO(this->get_logger(), "Add new node %d", node.id);
+        stored_Graph[req_robot_id]->nodes.push_back(node);
+        if(!node.is_obstacle){
+          new_nodes = true;
+          switch (updates_iter)
+          {
+          case 0:
+            first_batch.push_back(node);
+            eval_updates=false;
+            break;
+
+          case 1:
+            second_batch.push_back(node);
+            eval_updates=true;
+            break;
+          
+          default:
+            break;
+          }
+        }
         
-        if(edge.id<last_updated_edge){
-          stored_Graph[req_robot_id]->edges[edge.id]=edge;          
-        }
-        else{
-          stored_Graph[req_robot_id]->edges.push_back(edge);
-        }
       }
 
-    } else{
-      stored_Graph[name_space_id] = graph_received;
     }
+    if(new_nodes){
+      if(!eval_updates){
+          updates_iter++; 
+        } 
+        else{
+
+          first_batch.clear();
+          second_batch.clear();
+          updates_iter=0;
+      }
+    }
+   
+
+    for(gbeam2_interfaces::msg::GraphEdge edge : graph_received->edges){
+      
+      if(edge.id<last_updated_edge){
+        stored_Graph[req_robot_id]->edges[edge.id]=edge;          
+      }
+      else{
+        stored_Graph[req_robot_id]->edges.push_back(edge);
+      }
+    }
+
+
 
 
   }
@@ -544,58 +482,7 @@ private:
       //plotEigenvector(eigenvalues, reach_node_label);
 
 
-       // DEBUG CLOUDPOINT 
-      // Prepare the PointCloud2 message
-      sensor_msgs::msg::PointCloud2 cloud_msg;
-      cloud_msg.header.stamp = this->now();  // Set timestamp
-      cloud_msg.header.frame_id = "world";     // Set frame ID (adjust if necessary)
-
-      // Reserve space for the points and the additional "side" field
-      cloud_msg.height = 1;                  // Unordered point cloud (1D array)
-      cloud_msg.is_dense = false;            // Allow for possible invalid points
-      int total_points = reach_node_label.size();
-      cloud_msg.width = total_points;        // Number of points
-
-      // Define the PointCloud2 fields
-      sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
-      modifier.setPointCloud2Fields(4,  // Number of fields: x, y, z, and side
-          "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-          "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-          "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-          "comp", 1, sensor_msgs::msg::PointField::FLOAT32);  // Custom field for side (0 = left, 1 = right)
-
-      modifier.resize(total_points);  // Resize the point cloud to accommodate all points
-
-      // Use iterators for better handling of PointCloud2
-      sensor_msgs::PointCloud2Iterator<float> iter_x(cloud_msg, "x");
-      sensor_msgs::PointCloud2Iterator<float> iter_y(cloud_msg, "y");
-      sensor_msgs::PointCloud2Iterator<float> iter_z(cloud_msg, "z");
-      sensor_msgs::PointCloud2Iterator<float> iter_comp(cloud_msg, "comp");
-
-      // Fill the data in row-major order (first all values of reach_node_label, then all values of field_vector)
-      int i=0;
-      for (const auto& id : reach_node_label) {
-          msg.label_vector.push_back(static_cast<float>(id)); // First row: node labels
-          float comp = static_cast<float>(fiedler_vector(i));
-          msg.fieldler_vector.push_back(comp); // Second row: Eigen vector values
-
-          auto node = stored_Graph[name_space_id]->nodes[id];
-          *iter_x = node.x;
-          *iter_y = node.y;
-          *iter_z = node.z;
-          *iter_comp = comp;  // Right side
-        
-          ++iter_x;
-          ++iter_y;
-          ++iter_z;
-          ++iter_comp;
-
-          i++;
-      }
-      // Process obstacles and reachables
-
-      // Publish the point cloud
-      point_cloud_publisher_->publish(cloud_msg);
+       
 
       for (int i = 0; i < fiedler_vector2.size(); ++i) {
           msg.fieldler_vector2.push_back(static_cast<float>(fiedler_vector2(i))); // Second row: Eigen vector values
