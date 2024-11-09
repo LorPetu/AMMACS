@@ -213,22 +213,27 @@ private:
     double computeClusterCoeff(gbeam2_interfaces::msg::Vertex& node, std::vector<int>& batch_nodes_ids, gbeam2_interfaces::msg::GraphClusterNode& cluster, std::vector<std::vector<float>>& adj_matrix){
         double coeff=-1.0;
         int E=0;
-        std::vector<int> neighbours; // Vector to store the common elements
 
+        if(node.neighbors.empty()) return coeff; // BAD CASE OF DISCONNECTED NODE TODO
+
+        std::vector<int> first_intersection; // Temporary storage for intersections
+        std::vector<int> neighbours;
+
+        // Ensure inputs are sorted before intersection
         std::sort(node.neighbors.begin(), node.neighbors.end());
         std::sort(batch_nodes_ids.begin(), batch_nodes_ids.end());
         std::sort(cluster.nodes.begin(), cluster.nodes.end());
 
-
-        
-        // Get the intersection of both arrays
+        // First intersection: node.neighbors and batch_nodes_ids
         std::set_intersection(node.neighbors.begin(), node.neighbors.end(),
-                                batch_nodes_ids.begin(), batch_nodes_ids.end(),
-                                std::back_inserter(neighbours));
+                            batch_nodes_ids.begin(), batch_nodes_ids.end(),
+                            std::back_inserter(first_intersection));
 
-        std::set_intersection(cluster.nodes.begin(), cluster.nodes.end(),
-                                neighbours.begin(), neighbours.end(),
-                                std::back_inserter(neighbours));
+        // Second intersection: first_intersection and cluster.nodes
+        std::set_intersection(first_intersection.begin(), first_intersection.end(),
+                            cluster.nodes.begin(), cluster.nodes.end(),
+                            std::back_inserter(neighbours));
+
         int V = neighbours.size();
 
         for (int i:neighbours)
@@ -239,7 +244,7 @@ private:
                 }
                 
             }
-        if(V>1) coeff = 2.0*E/(V*(V-1));
+        coeff = (V>1) ? 2.0*E/(V*(V-1)) : 0.0;
 
         return coeff;
     }
@@ -593,6 +598,8 @@ private:
             clusters.clusters.push_back(createCluster(first_batch));
             RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
 
+            clusters_pub_->publish(clusters);
+
             //RESET
             tot_density_curr = 0.0;
             first_batch.clear();
@@ -600,6 +607,7 @@ private:
             second_batch.clear();
             second_batch_ids.clear();
             cluster_state=0;
+            unclustered_nodes.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
             gamma_2 = std::numeric_limits<double>::quiet_NaN();
         }
@@ -609,16 +617,16 @@ private:
             auto cluster_temp = createCluster(second_batch);
             clusters.clusters.push_back(cluster_temp);
 
-            for(int i=unclustered_nodes.size();i>=0;i--)
+            for(int i=unclustered_nodes.size()-1;i>=0;i--)
             {   
                 for (auto& cluster:clusters.clusters)
                 {
                     if(i>first_batch.size()){ // Processing only node of the second batch that could forms a new cluster
-                        double temp=computeClusterCoeff(graph.nodes[unclustered_nodes[i].node_id],second_batch_ids,cluster,new_adj_matrix);
+                        gbeam2_interfaces::msg::Vertex temp_node=graph.nodes[unclustered_nodes[i].node_id];
+                        double temp=computeClusterCoeff(temp_node,second_batch_ids,cluster,new_adj_matrix);
                         if(temp > unclustered_nodes[i].coeff){
                             unclustered_nodes[i].coeff=temp;
                             unclustered_nodes[i].cluster_id = cluster.cluster_id;
-                            
                         }  
                     }
                     else{ 
@@ -648,18 +656,27 @@ private:
                     }
                 }
 
+                RCLCPP_INFO(this->get_logger(),"Clustering || node %d assigned to cluster %d",unclustered_nodes[i].node_id,unclustered_nodes[i].cluster_id);
+                if(unclustered_nodes[i].cluster_id !=-1)
+                clusters.clusters[unclustered_nodes[i].cluster_id].nodes.push_back(unclustered_nodes[i].node_id);
+                
+
                            
             }
             
             
 
             RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
+
+            clusters_pub_->publish(clusters);
+
             tot_density_curr = 0.0;
             first_batch.clear();
             first_batch_ids.clear();
             second_batch.clear();
             second_batch_ids.clear();
             cluster_state=0;
+            unclustered_nodes.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
             gamma_2 = std::numeric_limits<double>::quiet_NaN();
 
@@ -674,7 +691,10 @@ private:
         // Reserve space for the points and the additional "side" field
         cloud_msg.height = 1;                  // Unordered point cloud (1D array)
         cloud_msg.is_dense = false;            // Allow for possible invalid points
-        int total_points = first_batch.size() + second_batch.size();
+        int total_points = 0;
+        for(auto& cluster:clusters.clusters){
+            total_points+= cluster.nodes.size();
+        }
         cloud_msg.width = total_points;        // Number of points
 
         // Define the PointCloud2 fields
@@ -683,7 +703,7 @@ private:
             "x", 1, sensor_msgs::msg::PointField::FLOAT32,
             "y", 1, sensor_msgs::msg::PointField::FLOAT32,
             "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-            "comp", 1, sensor_msgs::msg::PointField::FLOAT32);  // Custom field for side (0 = left, 1 = right)
+            "comp", 1, sensor_msgs::msg::PointField::FLOAT32); 
 
         modifier.resize(total_points);  // Resize the point cloud to accommodate all points
 
@@ -695,13 +715,13 @@ private:
 
         // Fill the data in row-major order (first all values of reach_node_label, then all values of field_vector)
         int i=0;
-        for (const auto& node : first_batch) {
-
-            //auto node = stored_Graph[name_space_id]->nodes[id];
+        for (const auto& cluster : clusters.clusters) {
+            for(int id:cluster.nodes){
+            auto node = graph.nodes[id];
             *iter_x = node.x;
             *iter_y = node.y;
             *iter_z = node.z;
-            *iter_comp = 0; 
+            *iter_comp = cluster.cluster_id; 
             
             ++iter_x;
             ++iter_y;
@@ -709,21 +729,8 @@ private:
             ++iter_comp;
 
             i++;
-        }
-        for (const auto& node : second_batch) {
-
-            //auto node = stored_Graph[name_space_id]->nodes[id];
-            *iter_x = node.x;
-            *iter_y = node.y;
-            *iter_z = node.z;
-            *iter_comp = 1;//unclustered_nodes[i].cluster_id; 
+            }
             
-            ++iter_x;
-            ++iter_y;
-            ++iter_z;
-            ++iter_comp;
-
-            i++;
         }
         // Process obstacles and reachables
 
