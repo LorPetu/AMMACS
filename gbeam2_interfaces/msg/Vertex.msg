@@ -10,3 +10,4 @@ bool is_visited
 bool is_reachable
 bool is_completely_connected
 int64 belong_to #indicates which drone has added the node
+int64 cluster_id
