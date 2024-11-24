@@ -209,6 +209,22 @@ private:
         RCLCPP_INFO(logger, "%s", oss.str().c_str());
     }
 
+    void printMatrix(rclcpp::Logger logger, const std::vector<std::vector<float>> &matrix, const std::string &matrix_name = "Matrix") {
+    RCLCPP_INFO(logger, "Printing %s:", matrix_name.c_str());
+    for (size_t i = 0; i < matrix.size(); ++i) {
+        std::ostringstream row_stream;
+        row_stream << "[ ";
+        for (size_t j = 0; j < matrix[i].size(); ++j) {
+            row_stream << matrix[i][j];
+            if (j < matrix[i].size() - 1) {
+                row_stream << ", ";
+            }
+        }
+        row_stream << " ]";
+        RCLCPP_INFO(logger, "Row %zu: %s", i, row_stream.str().c_str());
+    }
+}
+
     gbeam2_interfaces::msg::Vertex computeCentroid(gbeam2_interfaces::msg::GraphClusterNode& cluster) {
         gbeam2_interfaces::msg::Vertex centroid_vert;
         if (cluster.nodes.empty()) return centroid_vert;
@@ -300,6 +316,7 @@ private:
         int N=0;
         for(auto& node: nodes){
             new_cl.nodes.push_back(node.id);
+            graph.nodes[node.id].cluster_id =id;
             N++;
         }
         
@@ -989,35 +1006,6 @@ private:
                         }
 
                     }
-
-                    /*if (mod_gain_increase && old_cluster_id >= 0 && old_cluster_id != best_cl_id) {
-                        auto& old_cluster_nodes = louvain_Com.clusters[old_cluster_id].nodes;
-                        old_cluster_nodes.erase(std::remove(old_cluster_nodes.begin(), old_cluster_nodes.end(), candidate_id), old_cluster_nodes.end());
-                        RCLCPP_INFO(this->get_logger(), "Node %d removed from cluster %d.", candidate_id, old_cluster_id);
-
-                        if (old_cluster_nodes.empty()) {
-                            RCLCPP_INFO(this->get_logger(), "Cluster %d is empty and will be removed.", old_cluster_id);
-                            
-                            // Find and remove the cluster
-                            auto it = std::find_if(louvain_Com.clusters.begin(), louvain_Com.clusters.end(),
-                                                [old_cluster_id](const auto& cluster) {
-                                                    return cluster.cluster_id == old_cluster_id;
-                                                });
-                            if (it != louvain_Com.clusters.end()) {
-                                louvain_Com.clusters.erase(it);
-                            }
-                        }
-
-                    }
-
-                    node_to_cluster[candidate_id] = best_cl_id;
-                    unclustered_nodes[i].cluster_id = best_cl_id;
-                    auto& new_cluster_nodes = louvain_Com.clusters[best_cl_id].nodes;
-                    if (std::find(new_cluster_nodes.begin(), new_cluster_nodes.end(), candidate_id) == new_cluster_nodes.end()) {
-                        new_cluster_nodes.push_back(candidate_id);
-                        
-                        RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
-                    }*/
                 }
 
                 max_iterations++;
@@ -1032,17 +1020,74 @@ private:
             }
 
             // SEECOND PHASE COMMUNITY AGGREGATION WITH EXISTING CLUSTERS
-            int new_id = 0;
+            int new_id = clusters.clusters.size();
             // Use an iterator-based loop to safely modify the container
             for (auto it = louvain_Com.clusters.begin(); it != louvain_Com.clusters.end(); ) {
                 if (!it->nodes.empty()) {
                     it->cluster_id = new_id;
+                    for(auto& node_id:it->nodes){
+                        graph.nodes[node_id].cluster_id = new_id;
+                    }
+                    // Add louvain communities to cluster Graph
+                    clusters.clusters.push_back(*it);
                     new_id++;
                     ++it; // Move to the next cluster
                 } else {
                     RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
                     it = louvain_Com.clusters.erase(it); // Erase and get the next iterator
                 }
+            }
+            std::vector<std::vector<float>> cluster_adj_matrix(clusters.clusters.size(), std::vector<float>(clusters.clusters.size(), 0.0f));
+            
+            for (const auto& pair : node_to_cluster) {
+                RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
+            }
+
+
+            for (auto& cl_i : clusters.clusters) {
+                for (auto& node_id : cl_i.nodes) {
+                    for (int neigh_id = 0; neigh_id < new_adj_matrix[node_id].size(); neigh_id++) {
+                        // Check if the edge exists in the adjacency matrix
+                        if (new_adj_matrix[node_id][neigh_id] != -1) {
+                            gbeam2_interfaces::msg::Vertex neigh_node = graph.nodes[neigh_id];
+
+                            // Determine the cluster ID of the neighbor node
+                            int neigh_cluster_id = neigh_node.cluster_id;
+                            RCLCPP_INFO(this->get_logger(), "Neighbor node %d -> cluster ID %d", neigh_id, neigh_cluster_id);
+                            if (neigh_cluster_id == -1) {
+                                // Fallback to mapping if cluster ID is not set
+                                auto it = node_to_cluster.find(neigh_id);
+                                if (it != node_to_cluster.end()) {
+                                    neigh_cluster_id = it->second;
+                                } else {
+                                    RCLCPP_WARN(this->get_logger(),"Neighbor node %d has no cluster mapping!", neigh_id);
+                                    continue; // Skip if no mapping exists
+                                }
+                            }
+
+                            // Increment the cluster adjacency matrix entry
+                            cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1; // 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length
+                        }
+                    }
+                }
+            }
+
+            printMatrix(this->get_logger(),cluster_adj_matrix);
+
+            
+
+            while (mod_gain_increase && max_iterations < 50) {
+                mod_gain_increase = false; // Reset at the beginning of each iteration
+                RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm PHASE 2.", max_iterations + 1);
+
+                // Inside the iteration loop
+                for (auto& cluster:clusters.clusters) {
+                    
+                }
+
+                max_iterations++;
+                RCLCPP_INFO(this->get_logger(), "Iteration %d completed.", max_iterations);
+                
             }
 
 
