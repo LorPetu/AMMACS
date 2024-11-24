@@ -227,13 +227,52 @@ private:
         centroid_vert.z = sum_z / count;
     return centroid_vert;
     }
+    
+    double computeModularityGain(gbeam2_interfaces::msg::Vertex candidate_node,gbeam2_interfaces::msg::GraphClusterNode cluster,std::vector<std::vector<float>> weight_adj_matrix, double m){
+        // Compute the Modularity gain taking into account a batch of nodes 
+        double delta_mod;
+        double sum_in=0.0; // This represents the sum of the weights of the links inside a community. It only includes the connections between nodes that are both within the same community.
+        double sum_tot=0.0; // This represents the total sum of the weights of the links incident to nodes in a community. It accounts for all connections involving nodes within that community.
+        double k_cand =0.0; //sum of the weights of the links incident to node i, 
+        double k_in_cand=0.0; //ki,in is the sum of the weights of the links from i to nodes in C
+        for (int node_id : cluster.nodes) {
+            const auto& node = graph.nodes[node_id];
+
+            // Internal cluster connections
+            for (int neighbor_id : node.neighbors) {
+                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
+                    sum_in += weight_adj_matrix[node_id][neighbor_id];
+                }
+            }
+
+            // Total edge weights for sum_tot
+            for (int neighbor_id : node.neighbors) {
+                sum_tot += weight_adj_matrix[node_id][neighbor_id];
+            }
+            }
+
+            // Compute k_cand and k_in_cand
+            for (int neighbor_id : candidate_node.neighbors) {
+                k_cand += weight_adj_matrix[candidate_node.id][neighbor_id];
+                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
+                    k_in_cand += weight_adj_matrix[candidate_node.id][neighbor_id];
+                }
+        }
+
+        delta_mod = ((sum_in + 2.0 * k_in_cand) / (2.0 * m) - pow((sum_tot + k_cand) / (2.0 * m), 2)) - (sum_in / (2.0 * m) - pow(sum_tot / (2.0 * m), 2) - pow(k_cand / (2.0 * m), 2));
+        
+        return delta_mod;  
+    }
 
     gbeam2_interfaces::msg::GraphClusterNode createCluster(std::vector<gbeam2_interfaces::msg::Vertex> nodes){
         gbeam2_interfaces::msg::GraphClusterNode new_cl;
         new_cl.cluster_id = clusters.clusters.size();
+        int N=0;
         for(auto& node: nodes){
             new_cl.nodes.push_back(node.id);
+            N++;
         }
+        
 
         /*// Update adjacency matrix
         int N = clusters.adj_matr.size;
@@ -603,6 +642,24 @@ private:
         }
 
         auto new_adj_matrix = GraphAdj2matrix(graph.adj_matrix);
+        int N = new_adj_matrix.size();
+        double m = 0.0;
+        std::vector<std::vector<float>> weight_adj_matrix(N, std::vector<float>(N, 0.0f));  // Initialize with zeros
+
+        for (int i = 0; i < N; ++i) {
+            for (int j = i+1; j < N; ++j) {
+                int e_ij = new_adj_matrix[i][j];
+                if(e_ij!=-1){
+                    weight_adj_matrix[i][j] = 1/graph.edges[e_ij].length;
+                } 
+                else{
+                    weight_adj_matrix[i][j] = 0.0;
+                }
+                m+= weight_adj_matrix[i][j];
+            }
+           
+        }
+        
         //auto cl_adj_matrix = GraphAdj2matrix(clusters.adj_matr);
 
         // ####################################################
@@ -838,6 +895,7 @@ private:
             clusters.clusters.push_back(cluster_temp);
             int curr_cluster_id;
 
+
             for(int i=unclustered_nodes.size()-1;i>=0;i--)
             {   
                 std::vector<double> temp_clus_coeff_values;
@@ -845,7 +903,8 @@ private:
                 {
                     if(i>first_batch.size()){ // Processing only node of the second batch that could forms a new cluster
                         gbeam2_interfaces::msg::Vertex temp_node=graph.nodes[unclustered_nodes[i].node_id];
-                        double temp=computeDistanceWeightedTransitivity(temp_node,cluster,new_adj_matrix,false);
+                        //double temp=computeDistanceWeightedTransitivity(temp_node,cluster,new_adj_matrix,false);
+                        double temp=computeModularityGain(temp_node,cluster,weight_adj_matrix,m);
                         //double temp=computeClusterCoeff(temp_node,second_batch_ids,cluster,new_adj_matrix);
                         temp_clus_coeff_values.push_back(temp);
                         if(temp >= unclustered_nodes[i].coeff){
@@ -856,7 +915,8 @@ private:
                     }
                     else{ 
                         gbeam2_interfaces::msg::Vertex temp_node=graph.nodes[unclustered_nodes[i].node_id];
-                        double temp=computeDistanceWeightedTransitivity(temp_node,cluster,new_adj_matrix,true);
+                        //double temp=computeDistanceWeightedTransitivity(temp_node,cluster,new_adj_matrix,true);
+                        double temp=computeModularityGain(temp_node,cluster,weight_adj_matrix,m);
                         //double temp=computeClusterCoeff(graph.nodes[unclustered_nodes[i].node_id],first_batch_ids,cluster,new_adj_matrix);
                         temp_clus_coeff_values.push_back(temp);
                         if(temp >= unclustered_nodes[i].coeff){
