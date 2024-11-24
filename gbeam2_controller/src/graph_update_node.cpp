@@ -243,16 +243,13 @@ private:
                 if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
                     sum_in += weight_adj_matrix[node_id][neighbor_id];
                 }
-            }
-
-            // Total edge weights for sum_tot
-            for (int neighbor_id : node.neighbors) {
+                // Total edge weights for sum_tot
                 sum_tot += weight_adj_matrix[node_id][neighbor_id];
             }
-            }
+        }
 
-            // Compute k_cand and k_in_cand
-            for (int neighbor_id : candidate_node.neighbors) {
+        // Compute k_cand and k_in_cand
+        for (int neighbor_id : candidate_node.neighbors) {
                 k_cand += weight_adj_matrix[candidate_node.id][neighbor_id];
                 if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
                     k_in_cand += weight_adj_matrix[candidate_node.id][neighbor_id];
@@ -263,10 +260,43 @@ private:
         
         return delta_mod;  
     }
+    
+    double computeLocalModularityGain(gbeam2_interfaces::msg::Vertex candidate_node,gbeam2_interfaces::msg::GraphClusterNode cluster, std::unordered_map<int, int> node_to_cluster,std::vector<std::vector<float>> weight_adj_matrix, double m){
+        // Compute the Modularity gain taking into account a batch of nodes 
+        double delta_mod;
+        double sum_in=0.0; // This represents the sum of the weights of the links inside a community. It only includes the connections between nodes that are both within the same community.
+        double sum_tot=0.0; // This represents the total sum of the weights of the links incident to nodes in a community. It accounts for all connections involving nodes within that community.
+        double k_cand =0.0; //sum of the weights of the links incident to node i, 
+        double k_in_cand=0.0; //ki,in is the sum of the weights of the links from i to nodes in C
+        for (int node_id : cluster.nodes) {
+            const auto& node = graph.nodes[node_id];
 
-    gbeam2_interfaces::msg::GraphClusterNode createCluster(std::vector<gbeam2_interfaces::msg::Vertex> nodes){
+            // Internal cluster connections
+            for (int neighbor_id : node.neighbors) {
+                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
+                    sum_in += weight_adj_matrix[node_id][neighbor_id];
+                }
+                // Total edge weights for sum_tot
+                if(node_to_cluster.find(neighbor_id) != node_to_cluster.end()) sum_tot += weight_adj_matrix[node_id][neighbor_id];
+            }
+        }
+
+        // Compute k_cand and k_in_cand
+        for (int neighbor_id : candidate_node.neighbors) {
+                if(node_to_cluster.find(neighbor_id) != node_to_cluster.end()) k_cand += weight_adj_matrix[candidate_node.id][neighbor_id];
+                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
+                    k_in_cand += weight_adj_matrix[candidate_node.id][neighbor_id];
+                }
+        }
+
+        delta_mod = ((sum_in + 2.0 * k_in_cand) / (2.0 * m) - pow((sum_tot + k_cand) / (2.0 * m), 2)) - (sum_in / (2.0 * m) - pow(sum_tot / (2.0 * m), 2) - pow(k_cand / (2.0 * m), 2));
+        
+        return delta_mod;  
+    }
+
+    gbeam2_interfaces::msg::GraphClusterNode createCluster(std::vector<gbeam2_interfaces::msg::Vertex> nodes, int id){
         gbeam2_interfaces::msg::GraphClusterNode new_cl;
-        new_cl.cluster_id = clusters.clusters.size();
+        new_cl.cluster_id = id;
         int N=0;
         for(auto& node: nodes){
             new_cl.nodes.push_back(node.id);
@@ -872,7 +902,7 @@ private:
         if(cluster_state==1 && clusters.clusters.empty()){
             // If I haven't create any cluster yet first batch is the first cluster
 
-            clusters.clusters.push_back(createCluster(first_batch));
+            clusters.clusters.push_back(createCluster(first_batch,clusters.clusters.size()));
             RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
 
             clusters_pub_->publish(clusters);
@@ -891,12 +921,192 @@ private:
 
         if(cluster_state==2){ // Evaluate clustering coefficient and create new cluster
             
-            auto cluster_temp = createCluster(second_batch);
-            clusters.clusters.push_back(cluster_temp);
             int curr_cluster_id;
+            bool mod_gain_increase=true;
+            int max_iterations=0;
+            gbeam2_interfaces::msg::GraphCluster louvain_Com;
+            //std::vector<gbeam2_interfaces::msg::GraphClusterNode> louvain_Com;
+
+            // Mapping from node ID to cluster ID for quick lookup
+            std::unordered_map<int, int> node_to_cluster;
+
+            // Initialize singleton communities for the second batch
+            RCLCPP_INFO(this->get_logger(), "Initializing singleton communities...");
+            int next_cluster_id = 0; // Declare this outside the loop or as a class member
+
+            for (int i = unclustered_nodes.size() - 1; i >= 0; i--) {
+                auto new_cluster = createCluster(std::vector<gbeam2_interfaces::msg::Vertex>{graph.nodes[unclustered_nodes[i].node_id]}, next_cluster_id);
+                node_to_cluster[unclustered_nodes[i].node_id] = next_cluster_id;
+                unclustered_nodes[i].cluster_id = next_cluster_id;
+                louvain_Com.clusters.push_back(new_cluster);
+                RCLCPP_INFO(this->get_logger(), "Node %d initialized as a singleton cluster with ID %d.", unclustered_nodes[i].node_id, next_cluster_id);
+                next_cluster_id++; // Increment for the next cluster
+            }
+
+            // FIRST PHASE OF LOUVAIN ALGORITHM: COMMUNITY DETECTION
+            while (mod_gain_increase && max_iterations < 50) {
+                mod_gain_increase = false; // Reset at the beginning of each iteration
+                RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm.", max_iterations + 1);
+
+                // Inside the iteration loop
+                for (int i = unclustered_nodes.size() - 1; i >= 0; i--) {
+                    int candidate_id = unclustered_nodes[i].node_id;
+                    RCLCPP_INFO(this->get_logger(), "Processing node %d.", candidate_id);
+                    int best_cl_id=-1;
+                    int old_cluster_id=-1;
+                    for (int neigh_id = 0; neigh_id < new_adj_matrix[candidate_id].size(); neigh_id++) {
+                        if (new_adj_matrix[candidate_id][neigh_id] != -1 && node_to_cluster.find(neigh_id) != node_to_cluster.end()) {
+                            int found_cl_id = node_to_cluster[neigh_id];
+                            gbeam2_interfaces::msg::Vertex temp_node = graph.nodes[candidate_id];
+                            double temp_gain = computeLocalModularityGain(temp_node, louvain_Com.clusters[found_cl_id], node_to_cluster,weight_adj_matrix, m);
+                            RCLCPP_INFO(this->get_logger(), "Node %d -> Neighbor %d: Local modularity gain = %.6f", candidate_id, neigh_id, temp_gain);
+
+                            if (temp_gain > 0.0 && temp_gain > unclustered_nodes[i].coeff) {
+                                unclustered_nodes[i].coeff = temp_gain;
+                                mod_gain_increase =true; 
+                                best_cl_id =found_cl_id;
+                            }
+                        }
+                    }
+
+                    if(best_cl_id!=-1){
+                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, unclustered_nodes[i].coeff, best_cl_id);
+                        // Add the node to the best community
+                        old_cluster_id = node_to_cluster[candidate_id];
+                        node_to_cluster[candidate_id] = best_cl_id;
+                        unclustered_nodes[i].cluster_id = best_cl_id;
+                        auto& new_cluster_nodes = louvain_Com.clusters[best_cl_id].nodes;
+                        if (std::find(new_cluster_nodes.begin(), new_cluster_nodes.end(), candidate_id) == new_cluster_nodes.end()) {
+                            new_cluster_nodes.push_back(candidate_id);
+                            
+                            RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
+                        }
+
+                        // Erase it from the old one 
+                        if (old_cluster_id >= 0 ) { //&& old_cluster_id != best_cl_id
+                            auto& old_cluster_nodes = louvain_Com.clusters[old_cluster_id].nodes;
+                            old_cluster_nodes.erase(std::remove(old_cluster_nodes.begin(), old_cluster_nodes.end(), candidate_id), old_cluster_nodes.end());
+                        }
+
+                    }
+
+                    /*if (mod_gain_increase && old_cluster_id >= 0 && old_cluster_id != best_cl_id) {
+                        auto& old_cluster_nodes = louvain_Com.clusters[old_cluster_id].nodes;
+                        old_cluster_nodes.erase(std::remove(old_cluster_nodes.begin(), old_cluster_nodes.end(), candidate_id), old_cluster_nodes.end());
+                        RCLCPP_INFO(this->get_logger(), "Node %d removed from cluster %d.", candidate_id, old_cluster_id);
+
+                        if (old_cluster_nodes.empty()) {
+                            RCLCPP_INFO(this->get_logger(), "Cluster %d is empty and will be removed.", old_cluster_id);
+                            
+                            // Find and remove the cluster
+                            auto it = std::find_if(louvain_Com.clusters.begin(), louvain_Com.clusters.end(),
+                                                [old_cluster_id](const auto& cluster) {
+                                                    return cluster.cluster_id == old_cluster_id;
+                                                });
+                            if (it != louvain_Com.clusters.end()) {
+                                louvain_Com.clusters.erase(it);
+                            }
+                        }
+
+                    }
+
+                    node_to_cluster[candidate_id] = best_cl_id;
+                    unclustered_nodes[i].cluster_id = best_cl_id;
+                    auto& new_cluster_nodes = louvain_Com.clusters[best_cl_id].nodes;
+                    if (std::find(new_cluster_nodes.begin(), new_cluster_nodes.end(), candidate_id) == new_cluster_nodes.end()) {
+                        new_cluster_nodes.push_back(candidate_id);
+                        
+                        RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
+                    }*/
+                }
+
+                max_iterations++;
+                RCLCPP_INFO(this->get_logger(), "Iteration %d completed.", max_iterations);
+                
+            }
+
+            if (max_iterations >= 50) {
+                RCLCPP_WARN(this->get_logger(), "Maximum iterations reached without convergence.");
+            } else {
+                RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
+            }
+
+            // SEECOND PHASE COMMUNITY AGGREGATION WITH EXISTING CLUSTERS
+            int new_id = 0;
+            // Use an iterator-based loop to safely modify the container
+            for (auto it = louvain_Com.clusters.begin(); it != louvain_Com.clusters.end(); ) {
+                if (!it->nodes.empty()) {
+                    it->cluster_id = new_id;
+                    new_id++;
+                    ++it; // Move to the next cluster
+                } else {
+                    RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
+                    it = louvain_Com.clusters.erase(it); // Erase and get the next iterator
+                }
+            }
 
 
-            for(int i=unclustered_nodes.size()-1;i>=0;i--)
+            clusters_pub_->publish(louvain_Com);
+
+            // DEBUG CLOUDPOINT 
+            // Prepare the PointCloud2 message
+            sensor_msgs::msg::PointCloud2 cloud_msg;
+            cloud_msg.header.stamp = this->now();  // Set timestamp
+            cloud_msg.header.frame_id = "world";     // Set frame ID (adjust if necessary)
+
+            // Reserve space for the points and the additional "side" field
+            cloud_msg.height = 1;                  // Unordered point cloud (1D array)
+            cloud_msg.is_dense = false;            // Allow for possible invalid points
+            int total_points = 0;
+            for(auto& cluster:louvain_Com.clusters){
+                total_points+= cluster.nodes.size();
+            }
+            cloud_msg.width = total_points;        // Number of points
+
+            // Define the PointCloud2 fields
+            sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
+            modifier.setPointCloud2Fields(4,  // Number of fields: x, y, z, and side
+                "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+                "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+                "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+                "comp", 1, sensor_msgs::msg::PointField::FLOAT32); 
+
+            modifier.resize(total_points);  // Resize the point cloud to accommodate all points
+
+            // Use iterators for better handling of PointCloud2
+            sensor_msgs::PointCloud2Iterator<float> iter_x(cloud_msg, "x");
+            sensor_msgs::PointCloud2Iterator<float> iter_y(cloud_msg, "y");
+            sensor_msgs::PointCloud2Iterator<float> iter_z(cloud_msg, "z");
+            sensor_msgs::PointCloud2Iterator<float> iter_comp(cloud_msg, "comp");
+
+            // Fill the data in row-major order (first all values of reach_node_label, then all values of field_vector)
+            int i=0;
+            for (const auto& cluster : louvain_Com.clusters) {
+                for(int id:cluster.nodes){
+                auto node = graph.nodes[id];
+                *iter_x = node.x;
+                *iter_y = node.y;
+                *iter_z = node.z;
+                *iter_comp = cluster.cluster_id; 
+                
+                ++iter_x;
+                ++iter_y;
+                ++iter_z;
+                ++iter_comp;
+
+                i++;
+                }
+                
+            }
+            // Process obstacles and reachables
+
+            // Publish the point cloud
+            point_cloud_publisher_->publish(cloud_msg);
+
+
+            
+
+            /*for(int i=unclustered_nodes.size()-1;i>=0;i--)
             {   
                 std::vector<double> temp_clus_coeff_values;
                 for (auto& cluster:clusters.clusters)
@@ -959,12 +1169,12 @@ private:
                 cl.centroid = computeCentroid(cl);
             }
             //clusters.adj_matr = matrix2GraphAdj(cl_adj_matrix);
-            
+            */
             
 
             RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
 
-            clusters_pub_->publish(clusters);
+            //clusters_pub_->publish(clusters);
 
             tot_density_curr = 0.0;
             first_batch.clear();
@@ -978,61 +1188,7 @@ private:
 
         }
 
-        // DEBUG CLOUDPOINT 
-        // Prepare the PointCloud2 message
-        sensor_msgs::msg::PointCloud2 cloud_msg;
-        cloud_msg.header.stamp = this->now();  // Set timestamp
-        cloud_msg.header.frame_id = "world";     // Set frame ID (adjust if necessary)
-
-        // Reserve space for the points and the additional "side" field
-        cloud_msg.height = 1;                  // Unordered point cloud (1D array)
-        cloud_msg.is_dense = false;            // Allow for possible invalid points
-        int total_points = 0;
-        for(auto& cluster:clusters.clusters){
-            total_points+= cluster.nodes.size();
-        }
-        cloud_msg.width = total_points;        // Number of points
-
-        // Define the PointCloud2 fields
-        sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
-        modifier.setPointCloud2Fields(4,  // Number of fields: x, y, z, and side
-            "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-            "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-            "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-            "comp", 1, sensor_msgs::msg::PointField::FLOAT32); 
-
-        modifier.resize(total_points);  // Resize the point cloud to accommodate all points
-
-        // Use iterators for better handling of PointCloud2
-        sensor_msgs::PointCloud2Iterator<float> iter_x(cloud_msg, "x");
-        sensor_msgs::PointCloud2Iterator<float> iter_y(cloud_msg, "y");
-        sensor_msgs::PointCloud2Iterator<float> iter_z(cloud_msg, "z");
-        sensor_msgs::PointCloud2Iterator<float> iter_comp(cloud_msg, "comp");
-
-        // Fill the data in row-major order (first all values of reach_node_label, then all values of field_vector)
-        int i=0;
-        for (const auto& cluster : clusters.clusters) {
-            for(int id:cluster.nodes){
-            auto node = graph.nodes[id];
-            *iter_x = node.x;
-            *iter_y = node.y;
-            *iter_z = node.z;
-            *iter_comp = cluster.cluster_id; 
-            
-            ++iter_x;
-            ++iter_y;
-            ++iter_z;
-            ++iter_comp;
-
-            i++;
-            }
-            
-        }
-        // Process obstacles and reachables
-
-        // Publish the point cloud
-        point_cloud_publisher_->publish(cloud_msg);
-
+        
         // ####################################################
         // ####### --- UPDATE CONNECTIONS AND GAINS --- #######
         // #################################################### 
