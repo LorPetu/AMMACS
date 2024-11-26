@@ -244,33 +244,31 @@ private:
     return centroid_vert;
     }
     
-    double computeModularityGain(gbeam2_interfaces::msg::Vertex candidate_node,gbeam2_interfaces::msg::GraphClusterNode cluster,std::vector<std::vector<float>> weight_adj_matrix, double m){
+    double computeGlobalModularityGain(gbeam2_interfaces::msg::GraphClusterNode candidate_node,gbeam2_interfaces::msg::GraphClusterNode cluster,std::vector<std::vector<float>> weight_adj_matrix, double m){
         // Compute the Modularity gain taking into account a batch of nodes 
         double delta_mod;
         double sum_in=0.0; // This represents the sum of the weights of the links inside a community. It only includes the connections between nodes that are both within the same community.
         double sum_tot=0.0; // This represents the total sum of the weights of the links incident to nodes in a community. It accounts for all connections involving nodes within that community.
         double k_cand =0.0; //sum of the weights of the links incident to node i, 
         double k_in_cand=0.0; //ki,in is the sum of the weights of the links from i to nodes in C
-        for (int node_id : cluster.nodes) {
-            const auto& node = graph.nodes[node_id];
 
-            // Internal cluster connections
-            for (int neighbor_id : node.neighbors) {
-                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
-                    sum_in += weight_adj_matrix[node_id][neighbor_id];
-                }
-                // Total edge weights for sum_tot
-                sum_tot += weight_adj_matrix[node_id][neighbor_id];
+        for(auto& cand_neigh:weight_adj_matrix[candidate_node.cluster_id]){
+            if(cand_neigh==candidate_node.cluster_id || cand_neigh==cluster.cluster_id){
+
+                k_in_cand += weight_adj_matrix[candidate_node.cluster_id][cand_neigh];
+                sum_in += weight_adj_matrix[candidate_node.cluster_id][cand_neigh];
             }
+            k_cand += weight_adj_matrix[candidate_node.cluster_id][cand_neigh];
+            sum_tot += weight_adj_matrix[candidate_node.cluster_id][cand_neigh];
         }
 
-        // Compute k_cand and k_in_cand
-        for (int neighbor_id : candidate_node.neighbors) {
-                k_cand += weight_adj_matrix[candidate_node.id][neighbor_id];
-                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
-                    k_in_cand += weight_adj_matrix[candidate_node.id][neighbor_id];
-                }
+        for(auto& cluster_neigh:weight_adj_matrix[cluster.cluster_id]){
+            if(cluster_neigh==cluster.cluster_id){
+                sum_in += weight_adj_matrix[candidate_node.cluster_id][cluster_neigh];
+            }
+            sum_tot += weight_adj_matrix[candidate_node.cluster_id][cluster_neigh];
         }
+
 
         delta_mod = ((sum_in + 2.0 * k_in_cand) / (2.0 * m) - pow((sum_tot + k_cand) / (2.0 * m), 2)) - (sum_in / (2.0 * m) - pow(sum_tot / (2.0 * m), 2) - pow(k_cand / (2.0 * m), 2));
         
@@ -279,6 +277,7 @@ private:
     
     double computeLocalModularityGain(gbeam2_interfaces::msg::Vertex candidate_node,gbeam2_interfaces::msg::GraphClusterNode cluster, std::unordered_map<int, int> node_to_cluster,std::vector<std::vector<float>> weight_adj_matrix, double m){
         // Compute the Modularity gain taking into account a batch of nodes 
+        // NOTE: maybe m is not correctly computed, since i'm tryng to find the local communities of the new added nodes
         double delta_mod;
         double sum_in=0.0; // This represents the sum of the weights of the links inside a community. It only includes the connections between nodes that are both within the same community.
         double sum_tot=0.0; // This represents the total sum of the weights of the links incident to nodes in a community. It accounts for all connections involving nodes within that community.
@@ -918,8 +917,9 @@ private:
 
         if(cluster_state==1 && clusters.clusters.empty()){
             // If I haven't create any cluster yet first batch is the first cluster
+            int new_id = clusters.clusters.size();
 
-            clusters.clusters.push_back(createCluster(first_batch,clusters.clusters.size()));
+            clusters.clusters.push_back(createCluster(first_batch,new_id));
             RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
 
             clusters_pub_->publish(clusters);
@@ -1019,6 +1019,10 @@ private:
                 RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
             }
 
+            for (const auto& pair : node_to_cluster) {
+                RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
+            } 
+
             // SEECOND PHASE COMMUNITY AGGREGATION WITH EXISTING CLUSTERS
             int new_id = clusters.clusters.size();
             // Use an iterator-based loop to safely modify the container
@@ -1041,7 +1045,8 @@ private:
             
             for (const auto& pair : node_to_cluster) {
                 RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
-            }
+            } 
+            unclustered_nodes.clear();
 
 
             for (auto& cl_i : clusters.clusters) {
@@ -1053,7 +1058,7 @@ private:
 
                             // Determine the cluster ID of the neighbor node
                             int neigh_cluster_id = neigh_node.cluster_id;
-                            RCLCPP_INFO(this->get_logger(), "Neighbor node %d -> cluster ID %d", neigh_id, neigh_cluster_id);
+                            //RCLCPP_INFO(this->get_logger(), "Neighbor node %d -> cluster ID %d", neigh_id, neigh_cluster_id);
                             if (neigh_cluster_id == -1) {
                                 // Fallback to mapping if cluster ID is not set
                                 auto it = node_to_cluster.find(neigh_id);
@@ -1066,23 +1071,56 @@ private:
                             }
 
                             // Increment the cluster adjacency matrix entry
-                            cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1; // 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length
+                            cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
                         }
                     }
                 }
+                V_info cluster_node; cluster_node.node_id =cl_i.cluster_id; cluster_node.cluster_id =cl_i.cluster_id; cluster_node.coeff=-1.0;
+                unclustered_nodes.push_back(cluster_node);
             }
 
             printMatrix(this->get_logger(),cluster_adj_matrix);
 
-            
+            /*std::sort(clusters.clusters.begin(), clusters.clusters.end(),
+              [](const gbeam2_interfaces::msg::GraphClusterNode& a, const gbeam2_interfaces::msg::GraphClusterNode& b) {
+                  return a.nodes.size() < b.nodes.size(); // Descending order
+              });*/
+
+
+            mod_gain_increase=true;
+            max_iterations=0;
 
             while (mod_gain_increase && max_iterations < 50) {
                 mod_gain_increase = false; // Reset at the beginning of each iteration
                 RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm PHASE 2.", max_iterations + 1);
 
                 // Inside the iteration loop
-                for (auto& cluster:clusters.clusters) {
+                for (int i=0;i<clusters.clusters.size();i++) {
+                    int candidate_id = clusters.clusters[i].cluster_id;
+                    RCLCPP_INFO(this->get_logger(), "Processing cluster node %d.", candidate_id);
+                    int best_cl_id=-1;
+                    int old_cluster_id=-1;
+                    for (int neigh_id = 0; neigh_id < cluster_adj_matrix[candidate_id].size(); neigh_id++) {
+                        if (cluster_adj_matrix[candidate_id][neigh_id] != 0.0) {
+                            double temp_gain = computeGlobalModularityGain(clusters.clusters[i], clusters.clusters[neigh_id],cluster_adj_matrix, m);
+                            RCLCPP_INFO(this->get_logger(), "Cluster Node %d -> Cluster Neighbor %d: Local modularity gain = %.6f", candidate_id, neigh_id, temp_gain);
+
+                            if (temp_gain > 0.0 && temp_gain > unclustered_nodes[i].coeff) {
+                                unclustered_nodes[i].coeff = temp_gain;
+                                mod_gain_increase =true; 
+                                best_cl_id =neigh_id;
+                            }
+                        }
+                    }
+
+                    if(best_cl_id!=-1){
+                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, unclustered_nodes[i].coeff, best_cl_id);
+                        unclustered_nodes[i].cluster_id=best_cl_id;
+                        // Move all the nodes of cluster to the best cluster
+                        // Recompute weights? 
+                        // 
                     
+                    }
                 }
 
                 max_iterations++;
@@ -1148,73 +1186,6 @@ private:
             // Publish the point cloud
             point_cloud_publisher_->publish(cloud_msg);
 
-
-            
-
-            /*for(int i=unclustered_nodes.size()-1;i>=0;i--)
-            {   
-                std::vector<double> temp_clus_coeff_values;
-                for (auto& cluster:clusters.clusters)
-                {
-                    if(i>first_batch.size()){ // Processing only node of the second batch that could forms a new cluster
-                        gbeam2_interfaces::msg::Vertex temp_node=graph.nodes[unclustered_nodes[i].node_id];
-                        //double temp=computeDistanceWeightedTransitivity(temp_node,cluster,new_adj_matrix,false);
-                        double temp=computeModularityGain(temp_node,cluster,weight_adj_matrix,m);
-                        //double temp=computeClusterCoeff(temp_node,second_batch_ids,cluster,new_adj_matrix);
-                        temp_clus_coeff_values.push_back(temp);
-                        if(temp >= unclustered_nodes[i].coeff){
-                            unclustered_nodes[i].coeff=temp;
-                            unclustered_nodes[i].cluster_id = cluster.cluster_id;
-                        }  
-                        curr_cluster_id=2;
-                    }
-                    else{ 
-                        gbeam2_interfaces::msg::Vertex temp_node=graph.nodes[unclustered_nodes[i].node_id];
-                        //double temp=computeDistanceWeightedTransitivity(temp_node,cluster,new_adj_matrix,true);
-                        double temp=computeModularityGain(temp_node,cluster,weight_adj_matrix,m);
-                        //double temp=computeClusterCoeff(graph.nodes[unclustered_nodes[i].node_id],first_batch_ids,cluster,new_adj_matrix);
-                        temp_clus_coeff_values.push_back(temp);
-                        if(temp >= unclustered_nodes[i].coeff){
-                            unclustered_nodes[i].coeff=temp;
-                            unclustered_nodes[i].cluster_id = cluster.cluster_id;
-                        }   
-                        curr_cluster_id=1;
-
-                    }
-
-                                  
-                }
-                // After evaluate all the cluster coeff, i need to eventually reassign the ones in the second batch cluster
-
-                if (i > first_batch.size() && unclustered_nodes[i].cluster_id != cluster_temp.cluster_id) {
-                    // If the node of the second batch is re-assigned, remove it from the previous cluster if present
-                    auto& nodes = cluster_temp.nodes;
-
-                    // Find the node in the list of nodes
-                    auto it = std::find(nodes.begin(), nodes.end(), unclustered_nodes[i].node_id);
-
-                    // If the node ID is found, erase it
-                    if (it != nodes.end()) {
-                        nodes.erase(it);
-                    }
-
-                }
-
-                RCLCPP_INFO(this->get_logger(),"Clustering || node %d (from batch: %d) assigned to cluster %d",unclustered_nodes[i].node_id,curr_cluster_id, unclustered_nodes[i].cluster_id);
-                logDoubleVector(this->get_logger(),temp_clus_coeff_values); 
-                if(unclustered_nodes[i].cluster_id !=-1)
-                clusters.clusters[unclustered_nodes[i].cluster_id].nodes.push_back(unclustered_nodes[i].node_id);             
-
-                           
-            }
-
-
-
-            for(auto& cl:clusters.clusters){
-                cl.centroid = computeCentroid(cl);
-            }
-            //clusters.adj_matr = matrix2GraphAdj(cl_adj_matrix);
-            */
             
 
             RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
