@@ -6,3 +6,4 @@ int32[] unexplored_nodes
 int32[] neighbours_centroids
 int32[] bridge_nodes
 int32[] bridge_to_cluster_ids
+bool is_unmergeable

@@ -186,7 +186,9 @@ private:
     std::vector<int> second_batch_ids;
     bool start_batch=false;
 
-    gbeam2_interfaces::msg::GraphCluster clusters;
+    gbeam2_interfaces::msg::GraphCluster Graphclusters;
+    std::unordered_map<int, int> node_to_cluster;
+    std::unordered_map<int, int> node_to_coeff;
     std::vector<V_info> unclustered_nodes;
 
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr graph_pub_;
@@ -344,215 +346,46 @@ private:
 
         return new_cl;
 
+    }    
+
+    void addCluster(gbeam2_interfaces::msg::GraphClusterNode& cluster_toAdd){
+
     }
-   
-    double computeDistanceWeightedTransitivity(gbeam2_interfaces::msg::Vertex& node, gbeam2_interfaces::msg::GraphClusterNode cluster, std::vector<std::vector<float>>& adj_matrix, bool add_node) {
-        int closed_triplets = 0;
-        int total_triplets = 0;
-        double distance_weighted_closed_triplets = 0.0;
-        double distance_weighted_total_triplets = 0.0;
 
-        // Compute centroid of the cluster including the new node (if specified)
-        if (add_node)  cluster.nodes.push_back(node.id);
-
-        gbeam2_interfaces::msg::Vertex centroid = computeCentroid(cluster);
-
-        for (int u : cluster.nodes) {
-            const auto& neighbors = graph.nodes[u].neighbors;
-
-            // Collect neighbors within the cluster
-            std::vector<int> subset_neighbors;
-            for (int v : neighbors) {
-                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), v) != cluster.nodes.end()) {
-                    subset_neighbors.push_back(v);
-                }
+    void mergeClusters(gbeam2_interfaces::msg::GraphClusterNode& blob, gbeam2_interfaces::msg::GraphClusterNode& host,std::vector<std::vector<float>>& cluster_adj_matrix){
+        // Add cluster blob (and all of its nodes) to cluster host 
+        if(blob.is_unmergeable){
+            RCLCPP_INFO(this->get_logger(),"Cluster %d CAN NOT BE merged into %d",blob.cluster_id,host.cluster_id);
+        }else{
+            for(auto& node_id:blob.nodes){
+                host.nodes.push_back(node_id);
+                graph.nodes[node_id].cluster_id=host.cluster_id;
             }
+            blob.nodes.clear();
 
-            int k = subset_neighbors.size();
-            for (int i = 0; i < k; ++i) {
-                for (int j = i + 1; j < k; ++j) {
-                    int a = subset_neighbors[i];
-                    int b = subset_neighbors[j];
+            cluster_adj_matrix[host.cluster_id][host.cluster_id] += cluster_adj_matrix[blob.cluster_id][blob.cluster_id];
 
-                    // Calculate edge lengths and check if a-b are connected
-                    double edge_ab = graph.edges[adj_matrix[a][b]].length;
-                    double edge_au = graph.edges[adj_matrix[a][u]].length;
-                    double edge_ub = graph.edges[adj_matrix[u][b]].length;
-                    
-                    if (edge_ab != -1) {
-                        closed_triplets++;
+            //update matrix and weights
+            for (int i = 0; i < cluster_adj_matrix.size(); i++)
+            {
+                for (int j = i+1; j < cluster_adj_matrix.size(); j++)
+                {
+                    if(i==blob.cluster_id){
+                       cluster_adj_matrix[host.cluster_id][j] += cluster_adj_matrix[i][j];
+                       cluster_adj_matrix[j][host.cluster_id] += cluster_adj_matrix[j][i];
 
-                        // Calculate distances to centroid
-                        double dist_u = dist(graph.nodes[u],centroid);
-                        double dist_a = dist(graph.nodes[a],centroid);
-                        double dist_b = dist(graph.nodes[b],centroid);
-                        // Add inverse distance as weight (closer triplets contribute more)
-                        distance_weighted_closed_triplets += 1.0 / (dist_u + dist_a + dist_b + 1e-6);  // Add small value to avoid division by zero
+                       cluster_adj_matrix[i][j]=0;
+                       cluster_adj_matrix[j][i]=0;
                     }
-
-                    total_triplets++;
-                    distance_weighted_total_triplets += 1.0 / (edge_ab + edge_au + edge_ub + 1e-6);
                 }
-            }
-        }
-
-    return distance_weighted_total_triplets > 0 ? 
-           (distance_weighted_closed_triplets / distance_weighted_total_triplets) : -1.0;
-    }
-
-
-    double computeWeightedTransitivity(gbeam2_interfaces::msg::Vertex& node, gbeam2_interfaces::msg::GraphClusterNode& cluster, std::vector<std::vector<float>>& adj_matrix, bool add_node) {
-        int closed_triplets = 0;
-        int total_triplets = 0;
-        double weighted_closed_triplets = 0.0;
-        double weighted_total_triplets = 0.0;
-
-        auto temp_cluster = cluster.nodes;
-        if(add_node) temp_cluster.push_back(node.id);
-
-        for (int u : temp_cluster) {
-            const auto& neighbors = graph.nodes[u].neighbors;
-
-            // Consider only neighbors in the cluster
-            std::vector<int> subset_neighbors;
-            for (int v : neighbors) {
-                if (std::find(temp_cluster.begin(), temp_cluster.end(), v) != temp_cluster.end()) {
-                    subset_neighbors.push_back(v);
-                }
-            }
-
-            int k = subset_neighbors.size();
-            for (int i = 0; i < k; ++i) {
-                for (int j = i + 1; j < k; ++j) {
-                    int a = subset_neighbors[i];
-                    int b = subset_neighbors[j];
-
-                    // Calculate the edge lengths between nodes u-a, u-b, and a-b
-                    double edge_ua = adj_matrix[u][a];
-                    double edge_ub = adj_matrix[u][b];
-                    double edge_ab = adj_matrix[a][b];
-                    
-                    // Check if triplet is closed (a and b are connected)
-                    if (edge_ab != -1) {
-                        closed_triplets++;
-                        weighted_closed_triplets += 1.0 / (edge_ua + edge_ub + edge_ab);  // Weight by sum of edge lengths
-                    }
-                    total_triplets++;
-                    weighted_total_triplets += 1.0 / (edge_ua + edge_ub + (edge_ab != -1 ? edge_ab : 1.0));
-                }
-            }
-        }
-
-        return weighted_total_triplets > 0 ? (weighted_closed_triplets / weighted_total_triplets) : -1.0;
-    }
-
-
-    double computeTransitivity(gbeam2_interfaces::msg::Vertex& node, gbeam2_interfaces::msg::GraphClusterNode& cluster, std::vector<std::vector<float>>& adj_matrix, bool add_node) {
-        int closed_triplets = 0;
-        int total_triplets = 0;
-        int closed_triplets_with_node = 0;
-        int total_triplets_with_node = 0;
-
-        auto temp_cluster = cluster.nodes;
-        if(add_node) temp_cluster.push_back(node.id); //The las one is the just added node 
-
-        for (int u : temp_cluster) {
-            const auto& neighbors = graph.nodes[u].neighbors;
-            
-            // Only consider neighbors in the cluster
-            std::vector<int> subset_neighbors;
-            for (int v : neighbors) {
-                if (std::find(temp_cluster.begin(), temp_cluster.end(), v) != temp_cluster.end()) {
-                    subset_neighbors.push_back(v);
-                }
-            }
-
-            // Count triplets
-            int k = subset_neighbors.size();
-            for (int i = 0; i < k; ++i) {
-                for (int j = i + 1; j < k; ++j) {
-                    int a = subset_neighbors[i];
-                    int b = subset_neighbors[j];
-                    // Check if a and b are connected
-                    if(u!=node.id){
-                        if (adj_matrix[a][b]!=-1) {
-                        closed_triplets++;
-                        closed_triplets_with_node=closed_triplets;
-                        }
-                        total_triplets++;
-                        total_triplets_with_node=total_triplets;
-                    }else{
-                        if (adj_matrix[a][b]!=-1) {
-                        closed_triplets_with_node++;
-                        }
-                        total_triplets_with_node++;
-                    }
-                    
-                }
-            }
-        }
-
-        return total_triplets_with_node > 0 ? 
-        (3.0 * closed_triplets_with_node / total_triplets_with_node) - 
-        (3.0 * closed_triplets / total_triplets) 
-        : -10.0;
-
-    }
-
-
-    double computeClusterCoeff(gbeam2_interfaces::msg::Vertex& node, std::vector<int>& batch_nodes_ids, gbeam2_interfaces::msg::GraphClusterNode& cluster, std::vector<std::vector<float>>& adj_matrix){
-        double coeff=0.0;
-        int E=0;
-
-        if(node.neighbors.empty()) return -1.0; // BAD CASE OF DISCONNECTED NODE TODO
-
-        std::vector<int> first_intersection; // Temporary storage for intersections
-        std::vector<int> neighbours;
-
-        // Ensure inputs are sorted before intersection
-        std::sort(node.neighbors.begin(), node.neighbors.end());
-        std::sort(batch_nodes_ids.begin(), batch_nodes_ids.end());
-        std::sort(cluster.nodes.begin(), cluster.nodes.end());
-
-        // First intersection: node.neighbors and batch_nodes_ids
-        std::set_intersection(node.neighbors.begin(), node.neighbors.end(),
-                            batch_nodes_ids.begin(), batch_nodes_ids.end(),
-                            std::back_inserter(first_intersection));
-
-        // Second intersection: first_intersection and cluster.nodes
-        std::set_intersection(node.neighbors.begin(), node.neighbors.end(),
-                            cluster.nodes.begin(), cluster.nodes.end(),
-                            std::back_inserter(neighbours));
-
-        int V = neighbours.size();
-        double min_edge_lenght=INF;
-        int triangles=0;
-
-        for (int i : neighbours) {
-            for (int j : neighbours) {
-                if(adj_matrix[i][j]!=-1){
-
-                }
-            auto N_i = graph.nodes[i].neighbors;
-            auto N_j = graph.nodes[j].neighbors;
-            // Check if 'j' is also a neighbor of 'node'
-            if (std::find(node.neighbors.begin(), node.neighbors.end(), j) != node.neighbors.end()) {
-                coeff+=1/log(graph.nodes[i].neighbors.size());
-            }
-            }
-        }
-
-
-        // for (int i:neighbours)
-        //     {
-        //        coeff+=1/log(graph.nodes[i].neighbors.size());
                 
-        //     }
-        //coeff = (V>1) ? E/(V*(V-1)): 0.0; //E/(V*(V-1))
+            }
 
-        return coeff;
+            RCLCPP_INFO(this->get_logger(),"Cluster %d is merged into %d",blob.cluster_id,host.cluster_id);
+        }
+
+
     }
-    
 
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::FreePolygonStamped> received_nodes){
         // Each time i receive external nodes I store them 
@@ -822,6 +655,8 @@ private:
                 for(auto& new_node:new_reach_node){
                     first_batch.push_back(new_node);
                     first_batch_ids.push_back(new_node.id);
+                    node_to_cluster[new_node.id] = -1; 
+                    node_to_coeff[new_node.id] = -1.0; 
                     node_info.node_id=new_node.id;
                     node_info.coeff = -1.0;
                     node_info.cluster_id =-1;
@@ -865,6 +700,8 @@ private:
                 for(auto& new_node:new_reach_node){
                     second_batch.push_back(new_node);
                     second_batch_ids.push_back(new_node.id);
+                    node_to_cluster[new_node.id] = -1; 
+                    node_to_coeff[new_node.id] = -1.0; 
                     node_info.node_id=new_node.id;
                     node_info.coeff = -1.0;
                     node_info.cluster_id =-1;
@@ -913,16 +750,17 @@ private:
 
         // Evaluate delta between density and switch logic
 
-      
+        // LOCAL CLUSTERING with just added node and edges
 
-        if(cluster_state==1 && clusters.clusters.empty()){
+        if(cluster_state==1 && Graphclusters.clusters.empty()){
             // If I haven't create any cluster yet first batch is the first cluster
-            int new_id = clusters.clusters.size();
-
-            clusters.clusters.push_back(createCluster(first_batch,new_id));
+            int new_id = Graphclusters.clusters.size();
+            auto new_cluster = createCluster(first_batch,new_id);
+            new_cluster.is_unmergeable=true;
+            Graphclusters.clusters.push_back(new_cluster);
             RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
 
-            clusters_pub_->publish(clusters);
+            clusters_pub_->publish(Graphclusters);
 
             //RESET
             tot_density_curr = 0.0;
@@ -932,11 +770,14 @@ private:
             second_batch_ids.clear();
             cluster_state=0;
             unclustered_nodes.clear();
+            node_to_cluster.clear();
+            node_to_coeff.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
             gamma_2 = std::numeric_limits<double>::quiet_NaN();
         }
 
         if(cluster_state==2){ // Evaluate clustering coefficient and create new cluster
+                    
             
             int curr_cluster_id;
             bool mod_gain_increase=true;
@@ -945,7 +786,7 @@ private:
             //std::vector<gbeam2_interfaces::msg::GraphClusterNode> louvain_Com;
 
             // Mapping from node ID to cluster ID for quick lookup
-            std::unordered_map<int, int> node_to_cluster;
+            
 
             // Initialize singleton communities for the second batch
             RCLCPP_INFO(this->get_logger(), "Initializing singleton communities...");
@@ -959,6 +800,9 @@ private:
                 RCLCPP_INFO(this->get_logger(), "Node %d initialized as a singleton cluster with ID %d.", unclustered_nodes[i].node_id, next_cluster_id);
                 next_cluster_id++; // Increment for the next cluster
             }
+            for (const auto& pair : node_to_cluster) {
+                RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
+            } 
 
             // FIRST PHASE OF LOUVAIN ALGORITHM: COMMUNITY DETECTION
             while (mod_gain_increase && max_iterations < 50) {
@@ -1023,8 +867,10 @@ private:
                 RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
             } 
 
-            // SEECOND PHASE COMMUNITY AGGREGATION WITH EXISTING CLUSTERS
-            int new_id = clusters.clusters.size();
+            // GLOBAL CLUSTERING including already existing clusters
+
+            // SECOND PHASE COMMUNITY AGGREGATION WITH EXISTING CLUSTERS
+            int new_id = Graphclusters.clusters.size();
             // Use an iterator-based loop to safely modify the container
             for (auto it = louvain_Com.clusters.begin(); it != louvain_Com.clusters.end(); ) {
                 if (!it->nodes.empty()) {
@@ -1033,7 +879,7 @@ private:
                         graph.nodes[node_id].cluster_id = new_id;
                     }
                     // Add louvain communities to cluster Graph
-                    clusters.clusters.push_back(*it);
+                    Graphclusters.clusters.push_back(*it);
                     new_id++;
                     ++it; // Move to the next cluster
                 } else {
@@ -1041,7 +887,7 @@ private:
                     it = louvain_Com.clusters.erase(it); // Erase and get the next iterator
                 }
             }
-            std::vector<std::vector<float>> cluster_adj_matrix(clusters.clusters.size(), std::vector<float>(clusters.clusters.size(), 0.0f));
+            std::vector<std::vector<float>> cluster_adj_matrix(Graphclusters.clusters.size(), std::vector<float>(Graphclusters.clusters.size(), 0.0f));
             
             for (const auto& pair : node_to_cluster) {
                 RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
@@ -1049,7 +895,7 @@ private:
             unclustered_nodes.clear();
 
 
-            for (auto& cl_i : clusters.clusters) {
+            for (auto& cl_i : Graphclusters.clusters) {
                 for (auto& node_id : cl_i.nodes) {
                     for (int neigh_id = 0; neigh_id < new_adj_matrix[node_id].size(); neigh_id++) {
                         // Check if the edge exists in the adjacency matrix
@@ -1081,7 +927,7 @@ private:
 
             printMatrix(this->get_logger(),cluster_adj_matrix);
 
-            /*std::sort(clusters.clusters.begin(), clusters.clusters.end(),
+            /*std::sort(Graphclusters.clusters.begin(), Graphclusters.clusters.end(),
               [](const gbeam2_interfaces::msg::GraphClusterNode& a, const gbeam2_interfaces::msg::GraphClusterNode& b) {
                   return a.nodes.size() < b.nodes.size(); // Descending order
               });*/
@@ -1095,14 +941,14 @@ private:
                 RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm PHASE 2.", max_iterations + 1);
 
                 // Inside the iteration loop
-                for (int i=0;i<clusters.clusters.size();i++) {
-                    int candidate_id = clusters.clusters[i].cluster_id;
+                for (int i=Graphclusters.clusters.size()-1;i>=0;i--) {
+                    int candidate_id = Graphclusters.clusters[i].cluster_id;
                     RCLCPP_INFO(this->get_logger(), "Processing cluster node %d.", candidate_id);
                     int best_cl_id=-1;
                     int old_cluster_id=-1;
                     for (int neigh_id = 0; neigh_id < cluster_adj_matrix[candidate_id].size(); neigh_id++) {
-                        if (cluster_adj_matrix[candidate_id][neigh_id] != 0.0) {
-                            double temp_gain = computeGlobalModularityGain(clusters.clusters[i], clusters.clusters[neigh_id],cluster_adj_matrix, m);
+                        if (cluster_adj_matrix[candidate_id][neigh_id] != 0.0 && candidate_id!=neigh_id) {
+                            double temp_gain = computeGlobalModularityGain(Graphclusters.clusters[i], Graphclusters.clusters[neigh_id],cluster_adj_matrix, m);
                             RCLCPP_INFO(this->get_logger(), "Cluster Node %d -> Cluster Neighbor %d: Local modularity gain = %.6f", candidate_id, neigh_id, temp_gain);
 
                             if (temp_gain > 0.0 && temp_gain > unclustered_nodes[i].coeff) {
@@ -1117,8 +963,8 @@ private:
                         RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, unclustered_nodes[i].coeff, best_cl_id);
                         unclustered_nodes[i].cluster_id=best_cl_id;
                         // Move all the nodes of cluster to the best cluster
-                        // Recompute weights? 
-                        // 
+                        if(Graphclusters.clusters[i].nodes.size()<3) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix);
+                        printMatrix(this->get_logger(),cluster_adj_matrix);
                     
                     }
                 }
@@ -1128,10 +974,22 @@ private:
                 
             }
 
+            new_id=0;
+            for (auto it = Graphclusters.clusters.begin(); it != Graphclusters.clusters.end();) {
+                if (!it->nodes.empty()) {
+                    it->centroid = computeCentroid(*it);
+                    it->cluster_id = new_id;
+                    it->is_unmergeable = (it->nodes.size() > 1);
+                    ++new_id;
+                    ++it;
+                } else {
+                    RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
+                    it = Graphclusters.clusters.erase(it); // Safely remove and move the iterator
+                }
+            }
+      
 
-            clusters_pub_->publish(louvain_Com);
-
-            // DEBUG CLOUDPOINT 
+            /*// DEBUG CLOUDPOINT 
             // Prepare the PointCloud2 message
             sensor_msgs::msg::PointCloud2 cloud_msg;
             cloud_msg.header.stamp = this->now();  // Set timestamp
@@ -1164,8 +1022,12 @@ private:
 
             // Fill the data in row-major order (first all values of reach_node_label, then all values of field_vector)
             int i=0;
-            for (const auto& cluster : louvain_Com.clusters) {
+            for (auto cluster : Graphclusters.clusters) {
                 for(int id:cluster.nodes){
+                if (id < 0 || id >= graph.nodes.size()) {
+                    RCLCPP_ERROR(this->get_logger(), "Invalid node ID: %d. Skipping.", id);
+                    continue;
+                }
                 auto node = graph.nodes[id];
                 *iter_x = node.x;
                 *iter_y = node.y;
@@ -1184,13 +1046,14 @@ private:
             // Process obstacles and reachables
 
             // Publish the point cloud
-            point_cloud_publisher_->publish(cloud_msg);
+            point_cloud_publisher_->publish(cloud_msg);*/
 
             
 
             RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
 
-            //clusters_pub_->publish(clusters);
+            
+            clusters_pub_->publish(Graphclusters);
 
             tot_density_curr = 0.0;
             first_batch.clear();
@@ -1199,6 +1062,8 @@ private:
             second_batch_ids.clear();
             cluster_state=0;
             unclustered_nodes.clear();
+            node_to_cluster.clear();
+            node_to_coeff.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
             gamma_2 = std::numeric_limits<double>::quiet_NaN();
 
