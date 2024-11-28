@@ -648,6 +648,7 @@ private:
         double tot_density_curr;
         V_info node_info;
         double gamma_min = 0.3;
+        double m_local=0.0;
 
         switch (cluster_state){
 
@@ -668,7 +669,12 @@ private:
                 {
                     for (int j = first_batch[i].id +1; j < V; j++)
                     {
-                        if(new_adj_matrix[first_batch[i].id][j]!=-1) E_1++;
+                        if(new_adj_matrix[first_batch[i].id][j]!=-1) 
+                        {   
+                            m_local+=1/graph.edges[new_adj_matrix[first_batch[i].id][j]].length;
+                            //m+= weight_adj_matrix[i][j];
+                            E_1++;
+                        }
                     }
                     
                 }
@@ -713,7 +719,10 @@ private:
                 {
                     for (int j = second_batch[i].id +1; j < V; j++)
                     {
-                        if(new_adj_matrix[second_batch[i].id][j]!=-1) E_2++;
+                        if(new_adj_matrix[second_batch[i].id][j]!=-1) {
+                            E_2++;
+                            m_local+=1/graph.edges[new_adj_matrix[first_batch[i].id][j]].length;
+                            }
                     }
                     
                 }
@@ -764,6 +773,7 @@ private:
 
             //RESET
             tot_density_curr = 0.0;
+            m_local=0.0;
             first_batch.clear();
             first_batch_ids.clear();
             second_batch.clear();
@@ -777,8 +787,7 @@ private:
         }
 
         if(cluster_state==2){ // Evaluate clustering coefficient and create new cluster
-                    
-            
+   
             int curr_cluster_id;
             bool mod_gain_increase=true;
             int max_iterations=0;
@@ -946,18 +955,33 @@ private:
                     RCLCPP_INFO(this->get_logger(), "Processing cluster node %d.", candidate_id);
                     int best_cl_id=-1;
                     int old_cluster_id=-1;
+                    
                     for (int neigh_id = 0; neigh_id < cluster_adj_matrix[candidate_id].size(); neigh_id++) {
+                        double temp_gain;
                         if (cluster_adj_matrix[candidate_id][neigh_id] != 0.0 && candidate_id!=neigh_id) {
-                            double temp_gain = computeGlobalModularityGain(Graphclusters.clusters[i], Graphclusters.clusters[neigh_id],cluster_adj_matrix, m);
-                            RCLCPP_INFO(this->get_logger(), "Cluster Node %d -> Cluster Neighbor %d: Local modularity gain = %.6f", candidate_id, neigh_id, temp_gain);
+                            if(Graphclusters.clusters[i].nodes.size()<2){
+                                RCLCPP_INFO(this->get_logger(), "Cluster Node %d is a single node cluster and I could assign to %d", candidate_id, neigh_id);
+                                mod_gain_increase =true; 
+                                best_cl_id = neigh_id;
+                                temp_gain = cluster_adj_matrix[candidate_id][neigh_id];
+                            }else{
+                                temp_gain = computeGlobalModularityGain(Graphclusters.clusters[i], Graphclusters.clusters[neigh_id],cluster_adj_matrix, m);
+                                RCLCPP_INFO(this->get_logger(), "Cluster Node %d -> Cluster Neighbor %d: Local modularity gain = %.6f", candidate_id, neigh_id, temp_gain);
+                            }
+                            
 
                             if (temp_gain > 0.0 && temp_gain > unclustered_nodes[i].coeff) {
                                 unclustered_nodes[i].coeff = temp_gain;
                                 mod_gain_increase =true; 
-                                best_cl_id =neigh_id;
+                                best_cl_id = neigh_id;
                             }
+                            
+
+                            
                         }
                     }
+                    
+                    
 
                     if(best_cl_id!=-1){
                         RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, unclustered_nodes[i].coeff, best_cl_id);
@@ -989,7 +1013,7 @@ private:
             }
       
 
-            /*// DEBUG CLOUDPOINT 
+            // DEBUG CLOUDPOINT 
             // Prepare the PointCloud2 message
             sensor_msgs::msg::PointCloud2 cloud_msg;
             cloud_msg.header.stamp = this->now();  // Set timestamp
@@ -999,7 +1023,7 @@ private:
             cloud_msg.height = 1;                  // Unordered point cloud (1D array)
             cloud_msg.is_dense = false;            // Allow for possible invalid points
             int total_points = 0;
-            for(auto& cluster:louvain_Com.clusters){
+            for(auto& cluster:Graphclusters.clusters){
                 total_points+= cluster.nodes.size();
             }
             cloud_msg.width = total_points;        // Number of points
@@ -1046,7 +1070,7 @@ private:
             // Process obstacles and reachables
 
             // Publish the point cloud
-            point_cloud_publisher_->publish(cloud_msg);*/
+            point_cloud_publisher_->publish(cloud_msg);
 
             
 
