@@ -174,16 +174,10 @@ private:
     int E_new=0; //new added edges
     int V_new=0; //new just added edges
     int cluster_state=0;
-    std::vector<gbeam2_interfaces::msg::Vertex> first_batch;
-    std::vector<gbeam2_interfaces::msg::Vertex> second_batch;
     double gamma_1 = std::numeric_limits<double>::quiet_NaN();
-    double gamma_2 = std::numeric_limits<double>::quiet_NaN();
     int V_1;
-    int V_2;
     int E_1;
-    int E_2;
-    std::vector<int> first_batch_ids;
-    std::vector<int> second_batch_ids;
+    std::vector<int> update_batch;
     bool start_batch=false;
 
     gbeam2_interfaces::msg::GraphCluster Graphclusters;
@@ -227,6 +221,15 @@ private:
     }
 }
 
+    std::vector<gbeam2_interfaces::msg::Vertex> ids2VertexArray(std::vector<int> ids){
+        std::vector<gbeam2_interfaces::msg::Vertex> res;
+        for(int& id:ids){
+            res.push_back(graph.nodes[id]);
+        }
+
+        return res;
+    }
+    
     gbeam2_interfaces::msg::Vertex computeCentroid(gbeam2_interfaces::msg::GraphClusterNode& cluster) {
         gbeam2_interfaces::msg::Vertex centroid_vert;
         if (cluster.nodes.empty()) return centroid_vert;
@@ -647,124 +650,73 @@ private:
 
         double tot_density_curr;
         V_info node_info;
-        double gamma_min = 0.3;
+        double gamma_min = 0.5;
+        int N_vert_min = 4;
         double m_local=0.0;
+        double avg_degree = 0.0;
+        double min_avg_degree = 4.5;
 
-        switch (cluster_state){
-
-            case 0:
-                for(auto& new_node:new_reach_node){
-                    first_batch.push_back(new_node);
-                    first_batch_ids.push_back(new_node.id);
-                    node_to_cluster[new_node.id] = -1; 
-                    node_to_coeff[new_node.id] = -1.0; 
-                    node_info.node_id=new_node.id;
-                    node_info.coeff = -1.0;
-                    node_info.cluster_id =-1;
-                    unclustered_nodes.push_back(node_info);
-                }
-                E_1=0;
-                // Count how many edges are between nodes of this batch
-                for (int i = 0; i < first_batch.size(); i++)
+        if(cluster_state==0){
+            for(auto& new_node:new_reach_node){
+                update_batch.push_back(new_node.id);
+                node_to_cluster[new_node.id] = -1; 
+                node_to_coeff[new_node.id] = -1.0; 
+                node_info.node_id=new_node.id;
+                node_info.coeff = -1.0;
+                node_info.cluster_id =-1;
+                unclustered_nodes.push_back(node_info);
+            }
+            E_1=0;
+            // Count how many edges are between nodes of this batch
+            for (int& i : update_batch)
+            {
+                for (int& j : update_batch)
                 {
-                    for (int j = first_batch[i].id +1; j < V; j++)
-                    {
-                        if(new_adj_matrix[first_batch[i].id][j]!=-1) 
-                        {   
-                            m_local+=1/graph.edges[new_adj_matrix[first_batch[i].id][j]].length;
-                            //m+= weight_adj_matrix[i][j];
-                            E_1++;
-                        }
-                    }
                     
-                }
-                V_1 = first_batch.size();
-                if (V_1>1)
-                {
-                    tot_density_curr = 2.0*E_1/(V_1*(V_1-1)); // Current Edge density of the FIRST batch
-
-                    RCLCPP_INFO(this->get_logger(), "Case: %d || current_density: %f V: %d E: %d  || delta: %f",cluster_state,tot_density_curr,V_1,E_1,abs(tot_density_curr - gamma_1)/gamma_1);
-                }
-                else{
-                    RCLCPP_INFO(this->get_logger(), "Case: %d || I can't compute current_density V: %d E: %d ",cluster_state,V_1,E_1);
-                    break;
-                }
-
-                if(tot_density_curr!=0.0 && std::isnan(gamma_1)){
-                    gamma_1 = tot_density_curr; 
-                    // If i have already enough edge density, i have already a revelant batch
-                    if(gamma_1>gamma_min) cluster_state=1;
-                } else{
-                    if(gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=1;
-                }    
-
-
-                break;
-
-            case 1:
-                // Add new nodes to the batch
-                for(auto& new_node:new_reach_node){
-                    second_batch.push_back(new_node);
-                    second_batch_ids.push_back(new_node.id);
-                    node_to_cluster[new_node.id] = -1; 
-                    node_to_coeff[new_node.id] = -1.0; 
-                    node_info.node_id=new_node.id;
-                    node_info.coeff = -1.0;
-                    node_info.cluster_id =-1;
-                    unclustered_nodes.push_back(node_info);
-                }
-                E_2=0;
-                // Count how many edges are between nodes of this batch
-                for (int i = 0; i < second_batch.size(); i++)
-                {
-                    for (int j = second_batch[i].id +1; j < V; j++)
-                    {
-                        if(new_adj_matrix[second_batch[i].id][j]!=-1) {
-                            E_2++;
-                            m_local+=1/graph.edges[new_adj_matrix[first_batch[i].id][j]].length;
-                            }
+                    if(j>i && new_adj_matrix[i][j]!=-1) 
+                    {   
+                        m_local+=1/graph.edges[new_adj_matrix[i][j]].length;
+                        //m+= weight_adj_matrix[i][j];
+                        E_1++;
                     }
-                    
                 }
-                V_2 = second_batch.size();
-
-                if (V_2>1)
-                {
-                    tot_density_curr = 2.0*E_2/(V_2*(V_2-1)); // Current Edge density of the SECOND batch
-
-                    RCLCPP_INFO(this->get_logger(), "Case: %d ||current_density %f V: %d E: %d || delta: %f",cluster_state,tot_density_curr,V_2,E_2,abs(tot_density_curr - gamma_2)/gamma_2);
-
-                }
-                else{
-                    RCLCPP_INFO(this->get_logger(), "Case: %d ||I can't compute current_density V: %d E: %d ",cluster_state,V_2,E_2);
-                    break;
-                }
-
-                if(tot_density_curr!=0.0 && std::isnan(gamma_2)){
-                    gamma_2 = tot_density_curr; 
-                    // If i have already enough edge density, i have already a revelant batch
-                    if(gamma_2>gamma_min) cluster_state=1;
-                } else{
-                    if(gamma_2!=0 && abs(tot_density_curr - gamma_2)/gamma_2>gamma_min) cluster_state=2;
-                } 
+                avg_degree+= graph.nodes[i].neighbors.size();
                 
-                break;
+            }
+            V_1 = update_batch.size();
+            avg_degree=1.0*avg_degree/V_1;
+            if (V_1>1)
+            {
+                tot_density_curr = 2.0*E_1/(V_1*(V_1-1)); // Current Edge density of the FIRST batch
 
-            default:
-                break;
+                RCLCPP_INFO(this->get_logger(), "Case: %d || current_density: %f V: %d E: %d  || delta: %f",cluster_state,tot_density_curr,V_1,E_1,abs(tot_density_curr - gamma_1)/gamma_1);
+            }
+            else{
+                RCLCPP_INFO(this->get_logger(), "Case: %d || I can't compute current_density V: %d E: %d ",cluster_state,V_1,E_1);
+                //break;
+            }
+
+            if(tot_density_curr!=0.0 && std::isnan(gamma_1)){
+                gamma_1 = tot_density_curr; 
+                // If i have already enough edge density, i have already a revelant batch
+                if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1>0.5) cluster_state=2;
+            } else{
+                if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=2;
+            }    
+
         }
-            
+           
 
-        RCLCPP_INFO(this->get_logger(), "Case: %d ||gamma_1: %f gamma_2 %f",cluster_state,gamma_1,gamma_2);
+        RCLCPP_INFO(this->get_logger(), "Case: %d ||gamma_1: %f Average degree: %f",cluster_state,gamma_1,avg_degree);
 
         // Evaluate delta between density and switch logic
 
         // LOCAL CLUSTERING with just added node and edges
 
-        if(cluster_state==1 && Graphclusters.clusters.empty()){
+        if(cluster_state==2 && Graphclusters.clusters.empty()){
             // If I haven't create any cluster yet first batch is the first cluster
             int new_id = Graphclusters.clusters.size();
-            auto new_cluster = createCluster(first_batch,new_id);
+            auto new_cluster = createCluster(ids2VertexArray(update_batch),new_id);
             new_cluster.is_unmergeable=true;
             Graphclusters.clusters.push_back(new_cluster);
             RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
@@ -774,19 +726,15 @@ private:
             //RESET
             tot_density_curr = 0.0;
             m_local=0.0;
-            first_batch.clear();
-            first_batch_ids.clear();
-            second_batch.clear();
-            second_batch_ids.clear();
+            avg_degree=0.0;
+            update_batch.clear();
             cluster_state=0;
             unclustered_nodes.clear();
             node_to_cluster.clear();
             node_to_coeff.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
-            gamma_2 = std::numeric_limits<double>::quiet_NaN();
-        }
 
-        if(cluster_state==2){ // Evaluate clustering coefficient and create new cluster
+        }else if(cluster_state==2){ // Evaluate clustering coefficient and create new cluster
    
             int curr_cluster_id;
             bool mod_gain_increase=true;
@@ -1080,16 +1028,13 @@ private:
             clusters_pub_->publish(Graphclusters);
 
             tot_density_curr = 0.0;
-            first_batch.clear();
-            first_batch_ids.clear();
-            second_batch.clear();
-            second_batch_ids.clear();
+            avg_degree=0.0;
+            update_batch.clear();
             cluster_state=0;
             unclustered_nodes.clear();
             node_to_cluster.clear();
             node_to_coeff.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
-            gamma_2 = std::numeric_limits<double>::quiet_NaN();
 
         }
 
