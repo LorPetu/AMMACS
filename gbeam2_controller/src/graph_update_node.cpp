@@ -182,7 +182,10 @@ private:
 
     gbeam2_interfaces::msg::GraphCluster Graphclusters;
     std::unordered_map<int, int> node_to_cluster;
-    std::unordered_map<int, int> node_to_coeff;
+    std::unordered_map<int, double> node_to_coeff;
+    gbeam2_interfaces::msg::GraphCluster louvain_Com;
+    std::unordered_map<int, int> ClusterNode_to_comm;
+    std::unordered_map<int, double> ClusterNode_coeff;
     std::vector<V_info> unclustered_nodes;
 
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr graph_pub_;
@@ -205,13 +208,30 @@ private:
         RCLCPP_INFO(logger, "%s", oss.str().c_str());
     }
 
+#include <iomanip>
+
     void printMatrix(rclcpp::Logger logger, const std::vector<std::vector<float>> &matrix, const std::string &matrix_name = "Matrix") {
     RCLCPP_INFO(logger, "Printing %s:", matrix_name.c_str());
+    
+    // Determine the maximum width for each column
+    std::vector<size_t> column_widths;
+    for (const auto& row : matrix) {
+        if (row.size() > column_widths.size()) {
+            column_widths.resize(row.size(), 0);
+        }
+        for (size_t j = 0; j < row.size(); ++j) {
+            std::ostringstream temp;
+            temp << std::fixed << std::setprecision(2) << row[j];
+            column_widths[j] = std::max(column_widths[j], temp.str().size());
+        }
+    }
+
+    // Print each row with formatted spacing
     for (size_t i = 0; i < matrix.size(); ++i) {
         std::ostringstream row_stream;
         row_stream << "[ ";
         for (size_t j = 0; j < matrix[i].size(); ++j) {
-            row_stream << matrix[i][j];
+            row_stream << std::setw(column_widths[j]) << std::fixed << std::setprecision(2) << matrix[i][j];
             if (j < matrix[i].size() - 1) {
                 row_stream << ", ";
             }
@@ -219,7 +239,8 @@ private:
         row_stream << " ]";
         RCLCPP_INFO(logger, "Row %zu: %s", i, row_stream.str().c_str());
     }
-}
+    }
+
 
     std::vector<gbeam2_interfaces::msg::Vertex> ids2VertexArray(std::vector<int> ids){
         std::vector<gbeam2_interfaces::msg::Vertex> res;
@@ -239,7 +260,7 @@ private:
             sum_x += graph.nodes[node_id].x;
             sum_y += graph.nodes[node_id].y;
             sum_z += graph.nodes[node_id].z;
-            graph.nodes[node_id].cluster_id=cluster.cluster_id;
+            //graph.nodes[node_id].cluster_id=cluster.cluster_id;
         }
 
         int count = cluster.nodes.size();
@@ -256,8 +277,10 @@ private:
         double sum_tot=0.0; // This represents the total sum of the weights of the links incident to nodes in a community. It accounts for all connections involving nodes within that community.
         double k_cand =0.0; //sum of the weights of the links incident to node i, 
         double k_in_cand=0.0; //ki,in is the sum of the weights of the links from i to nodes in C
-
-        for(auto& cand_neigh:weight_adj_matrix[candidate_node.cluster_id]){
+        
+        RCLCPP_INFO(this->get_logger(),"Computing Global Modularity....");
+        
+        for(int cand_neigh=0;cand_neigh<weight_adj_matrix[candidate_node.cluster_id].size();cand_neigh++){
             if(cand_neigh==candidate_node.cluster_id || cand_neigh==cluster.cluster_id){
 
                 k_in_cand += weight_adj_matrix[candidate_node.cluster_id][cand_neigh];
@@ -267,7 +290,7 @@ private:
             sum_tot += weight_adj_matrix[candidate_node.cluster_id][cand_neigh];
         }
 
-        for(auto& cluster_neigh:weight_adj_matrix[cluster.cluster_id]){
+        for(int cluster_neigh=0;cluster_neigh<weight_adj_matrix[candidate_node.cluster_id].size();cluster_neigh++){
             if(cluster_neigh==cluster.cluster_id){
                 sum_in += weight_adj_matrix[candidate_node.cluster_id][cluster_neigh];
             }
@@ -277,6 +300,46 @@ private:
 
         delta_mod = ((sum_in + 2.0 * k_in_cand) / (2.0 * m) - pow((sum_tot + k_cand) / (2.0 * m), 2)) - (sum_in / (2.0 * m) - pow(sum_tot / (2.0 * m), 2) - pow(k_cand / (2.0 * m), 2));
         
+        RCLCPP_INFO(this->get_logger(),"End Computing Global Modularity....");
+
+        return delta_mod;  
+    }
+
+    double computeGlobalModularityGain2(gbeam2_interfaces::msg::GraphClusterNode candidate_node,gbeam2_interfaces::msg::GraphClusterNode cluster,std::vector<std::vector<float>> weight_adj_matrix, double m){
+        double delta_mod;
+        double sum_in=0.0; // This represents the sum of the weights of the links inside a community. It only includes the connections between nodes that are both within the same community.
+        double sum_tot=0.0; // This represents the total sum of the weights of the links incident to nodes in a community. It accounts for all connections involving nodes within that community.
+        double k_cand =0.0; //sum of the weights of the links incident to node i, 
+        double k_in_cand=0.0; //ki,in is the sum of the weights of the links from i to nodes in C
+        int candidate_id = candidate_node.cluster_id;
+
+        RCLCPP_INFO(this->get_logger(),"Computing Global Modularity 2....");
+
+        for (int node_id : cluster.nodes) {
+            const auto& node = graph.nodes[node_id];
+
+            // Internal cluster connections
+            for (int neighbor_id : node.neighbors) {
+                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
+                    sum_in += weight_adj_matrix[node_id][neighbor_id];
+                }
+                // Total edge weights for sum_tot
+                if(ClusterNode_to_comm.find(neighbor_id) != ClusterNode_to_comm.end()) sum_tot += weight_adj_matrix[node_id][neighbor_id];
+            }
+        }
+
+        // Compute k_cand and k_in_cand
+        for(auto& cluster_neigh:weight_adj_matrix[cluster.cluster_id]){
+                if(ClusterNode_to_comm.find(cluster_neigh) != ClusterNode_to_comm.end()) k_cand += weight_adj_matrix[candidate_id][cluster_neigh];
+                if (std::find(cluster.nodes.begin(), cluster.nodes.end(), cluster_neigh) != cluster.nodes.end()) {
+                    k_in_cand += weight_adj_matrix[candidate_id][cluster_neigh];
+                }
+        }
+
+        delta_mod = ((sum_in + 2.0 * k_in_cand) / (2.0 * m) - pow((sum_tot + k_cand) / (2.0 * m), 2)) - (sum_in / (2.0 * m) - pow(sum_tot / (2.0 * m), 2) - pow(k_cand / (2.0 * m), 2));
+        
+        RCLCPP_INFO(this->get_logger(),"End Computing Global Modularity 2 ....");
+
         return delta_mod;  
     }
     
@@ -314,13 +377,13 @@ private:
         return delta_mod;  
     }
 
-    gbeam2_interfaces::msg::GraphClusterNode createCluster(std::vector<gbeam2_interfaces::msg::Vertex> nodes, int id){
+    gbeam2_interfaces::msg::GraphClusterNode createCluster(std::vector<gbeam2_interfaces::msg::Vertex> nodes, int id, bool node_enum){
         gbeam2_interfaces::msg::GraphClusterNode new_cl;
         new_cl.cluster_id = id;
         int N=0;
         for(auto& node: nodes){
             new_cl.nodes.push_back(node.id);
-            graph.nodes[node.id].cluster_id =id;
+            if(node_enum) graph.nodes[node.id].cluster_id =id;
             N++;
         }
         
@@ -367,6 +430,7 @@ private:
             blob.nodes.clear();
 
             cluster_adj_matrix[host.cluster_id][host.cluster_id] += cluster_adj_matrix[blob.cluster_id][blob.cluster_id];
+            cluster_adj_matrix[blob.cluster_id][blob.cluster_id] = 0.0;
 
             //update matrix and weights
             for (int i = 0; i < cluster_adj_matrix.size(); i++)
@@ -444,6 +508,7 @@ private:
             //RCLCPP_INFO(this->get_logger(),"entrato nel primo for -------> ");
             gbeam2_interfaces::msg::Vertex vert = poly_ptr->polygon.vertices_reachable[i];  //get vertex from polytope
             vert.belong_to = name_space_id;
+            vert.cluster_id = -1;
             vert = vert_transform(vert, l2g_tf); //change coordinates to global position
 
             float vert_dist = vert_graph_distance_noobstacle(graph, vert);
@@ -485,6 +550,7 @@ private:
         {
             gbeam2_interfaces::msg::Vertex vert = poly_ptr->polygon.vertices_obstacles[i];  //get vertex from polytope
             vert.belong_to = name_space_id;
+            vert.cluster_id = -1;
             vert = vert_transform(vert, l2g_tf); //change coordinates to global position
 
             vert = moveAway(vert, obstacle_margin);
@@ -649,22 +715,22 @@ private:
         E = graph.edges.size();
 
         double tot_density_curr;
-        V_info node_info;
-        double gamma_min = 0.5;
-        int N_vert_min = 4;
+        double gamma_min = 0.33;
+        int N_vert_min = 3;
         double m_local=0.0;
         double avg_degree = 0.0;
-        double min_avg_degree = 4.5;
+        double min_avg_degree = 3;
+        int next_cluster_id = node_to_cluster.size(); // Declare this outside the loop or as a class member
 
         if(cluster_state==0){
             for(auto& new_node:new_reach_node){
                 update_batch.push_back(new_node.id);
-                node_to_cluster[new_node.id] = -1; 
+                node_to_cluster[new_node.id] = next_cluster_id; 
                 node_to_coeff[new_node.id] = -1.0; 
-                node_info.node_id=new_node.id;
-                node_info.coeff = -1.0;
-                node_info.cluster_id =-1;
-                unclustered_nodes.push_back(node_info);
+                auto new_cluster = createCluster(std::vector<gbeam2_interfaces::msg::Vertex>{graph.nodes[new_node.id]}, next_cluster_id,false);
+                louvain_Com.clusters.push_back(new_cluster);
+                RCLCPP_INFO(this->get_logger(), "Node %d initialized as a singleton cluster with ID %d. Coeff: %.6f", new_node.id, next_cluster_id, node_to_coeff[new_node.id]);
+                next_cluster_id++; // Increment for the next cluster
             }
             E_1=0;
             // Count how many edges are between nodes of this batch
@@ -716,7 +782,7 @@ private:
         if(cluster_state==2 && Graphclusters.clusters.empty()){
             // If I haven't create any cluster yet first batch is the first cluster
             int new_id = Graphclusters.clusters.size();
-            auto new_cluster = createCluster(ids2VertexArray(update_batch),new_id);
+            auto new_cluster = createCluster(ids2VertexArray(update_batch),new_id,true);
             new_cluster.is_unmergeable=true;
             Graphclusters.clusters.push_back(new_cluster);
             RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
@@ -727,72 +793,62 @@ private:
             tot_density_curr = 0.0;
             m_local=0.0;
             avg_degree=0.0;
+            
             update_batch.clear();
             cluster_state=0;
-            unclustered_nodes.clear();
+            louvain_Com.clusters.clear();
             node_to_cluster.clear();
             node_to_coeff.clear();
+            ClusterNode_coeff.clear();
+            ClusterNode_to_comm.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
 
         }else if(cluster_state==2){ // Evaluate clustering coefficient and create new cluster
-   
-            int curr_cluster_id;
             bool mod_gain_increase=true;
-            int max_iterations=0;
-            gbeam2_interfaces::msg::GraphCluster louvain_Com;
-            //std::vector<gbeam2_interfaces::msg::GraphClusterNode> louvain_Com;
-
-            // Mapping from node ID to cluster ID for quick lookup
-            
+            int max_iterations=0;            
 
             // Initialize singleton communities for the second batch
-            RCLCPP_INFO(this->get_logger(), "Initializing singleton communities...");
-            int next_cluster_id = 0; // Declare this outside the loop or as a class member
-
-            for (int i = unclustered_nodes.size() - 1; i >= 0; i--) {
-                auto new_cluster = createCluster(std::vector<gbeam2_interfaces::msg::Vertex>{graph.nodes[unclustered_nodes[i].node_id]}, next_cluster_id);
-                node_to_cluster[unclustered_nodes[i].node_id] = next_cluster_id;
-                unclustered_nodes[i].cluster_id = next_cluster_id;
-                louvain_Com.clusters.push_back(new_cluster);
-                RCLCPP_INFO(this->get_logger(), "Node %d initialized as a singleton cluster with ID %d.", unclustered_nodes[i].node_id, next_cluster_id);
-                next_cluster_id++; // Increment for the next cluster
-            }
-            for (const auto& pair : node_to_cluster) {
-                RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
-            } 
+            // RCLCPP_INFO(this->get_logger(), "Initializing singleton communities...");
+            // for (const auto& pair : node_to_cluster) {
+            //     RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
+            // } 
 
             // FIRST PHASE OF LOUVAIN ALGORITHM: COMMUNITY DETECTION
-            while (mod_gain_increase && max_iterations < 50) {
+            while (mod_gain_increase && max_iterations < 4) {
                 mod_gain_increase = false; // Reset at the beginning of each iteration
                 RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm.", max_iterations + 1);
 
                 // Inside the iteration loop
-                for (int i = unclustered_nodes.size() - 1; i >= 0; i--) {
-                    int candidate_id = unclustered_nodes[i].node_id;
+                for (int i = update_batch.size() - 1; i >= 0; i--) {
+                    int candidate_id = update_batch[i];
+                    gbeam2_interfaces::msg::Vertex candidate_node = graph.nodes[candidate_id];
                     RCLCPP_INFO(this->get_logger(), "Processing node %d.", candidate_id);
                     int best_cl_id=-1;
                     int old_cluster_id=-1;
-                    for (int neigh_id = 0; neigh_id < new_adj_matrix[candidate_id].size(); neigh_id++) {
+                    // We iter between all the neighbours of the candidate node that are unclustered (So we're not considering the old ones) and upon that
+                    // we evaluate the gain in modularity including that node in the neighbour community
+                    for (int neigh_id = 0; neigh_id < new_adj_matrix[candidate_id].size(); neigh_id++) { 
                         if (new_adj_matrix[candidate_id][neigh_id] != -1 && node_to_cluster.find(neigh_id) != node_to_cluster.end()) {
                             int found_cl_id = node_to_cluster[neigh_id];
-                            gbeam2_interfaces::msg::Vertex temp_node = graph.nodes[candidate_id];
-                            double temp_gain = computeLocalModularityGain(temp_node, louvain_Com.clusters[found_cl_id], node_to_cluster,weight_adj_matrix, m);
-                            RCLCPP_INFO(this->get_logger(), "Node %d -> Neighbor %d: Local modularity gain = %.6f", candidate_id, neigh_id, temp_gain);
+                            double temp_gain = computeLocalModularityGain(candidate_node, louvain_Com.clusters[found_cl_id], node_to_cluster, weight_adj_matrix, m);
 
-                            if (temp_gain > 0.0 && temp_gain > unclustered_nodes[i].coeff) {
-                                unclustered_nodes[i].coeff = temp_gain;
-                                mod_gain_increase =true; 
-                                best_cl_id =found_cl_id;
+                            RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
+
+                            if (temp_gain > 0.0 && temp_gain > node_to_coeff[candidate_id]) {
+                                node_to_coeff[candidate_id] = temp_gain;
+                                mod_gain_increase = true; 
+                                best_cl_id = found_cl_id;
                             }
                         }
                     }
 
+                    // After visiting all the neighbours, if a max gain is detected we add that node to the community
+
                     if(best_cl_id!=-1){
-                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, unclustered_nodes[i].coeff, best_cl_id);
+                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, node_to_coeff[candidate_id], best_cl_id);
                         // Add the node to the best community
                         old_cluster_id = node_to_cluster[candidate_id];
                         node_to_cluster[candidate_id] = best_cl_id;
-                        unclustered_nodes[i].cluster_id = best_cl_id;
                         auto& new_cluster_nodes = louvain_Com.clusters[best_cl_id].nodes;
                         if (std::find(new_cluster_nodes.begin(), new_cluster_nodes.end(), candidate_id) == new_cluster_nodes.end()) {
                             new_cluster_nodes.push_back(candidate_id);
@@ -820,20 +876,31 @@ private:
                 RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
             }
 
-            for (const auto& pair : node_to_cluster) {
-                RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
-            } 
+            for(auto& comm:louvain_Com.clusters){
+                for (auto& node_id:comm.nodes)
+                {
+                    RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
+                    RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
+                }
+                
+               
+            }
 
+            // #####################################################
             // GLOBAL CLUSTERING including already existing clusters
-
+            // #####################################################
             // SECOND PHASE COMMUNITY AGGREGATION WITH EXISTING CLUSTERS
+            // #####################################################
+
+            // Iniziatization: we need to remove empty communities, and reassign to actual cluster id to the node
+
             int new_id = Graphclusters.clusters.size();
             // Use an iterator-based loop to safely modify the container
             for (auto it = louvain_Com.clusters.begin(); it != louvain_Com.clusters.end(); ) {
                 if (!it->nodes.empty()) {
                     it->cluster_id = new_id;
-                    for(auto& node_id:it->nodes){
-                        graph.nodes[node_id].cluster_id = new_id;
+                    for(auto& node:it->nodes){
+                        node_to_cluster[node]=new_id;
                     }
                     // Add louvain communities to cluster Graph
                     Graphclusters.clusters.push_back(*it);
@@ -845,41 +912,53 @@ private:
                 }
             }
             std::vector<std::vector<float>> cluster_adj_matrix(Graphclusters.clusters.size(), std::vector<float>(Graphclusters.clusters.size(), 0.0f));
-            
-            for (const auto& pair : node_to_cluster) {
-                RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
-            } 
-            unclustered_nodes.clear();
 
+            for(auto& comm:louvain_Com.clusters){
+                for (auto& node_id:comm.nodes)
+                {
+                    RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
+                    RCLCPP_INFO(this->get_logger(), "NEW MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
+                }
+                
+               
+            }
+
+            // Inizialization: Readapte cluster mapping to describe global commmunities 
+            //unclustered_nodes.clear();
+
+            // Inizialization: Populate the GraphCluster weight matrix 
+            // We want to identify all the edges INSIDE the cluster to make them self loop on a global level 
+            // We want to identify also the INCOMING and OUTCOMING edges from nodes of a cluster i to node of cluster j
 
             for (auto& cl_i : Graphclusters.clusters) {
                 for (auto& node_id : cl_i.nodes) {
-                    for (int neigh_id = 0; neigh_id < new_adj_matrix[node_id].size(); neigh_id++) {
-                        // Check if the edge exists in the adjacency matrix
-                        if (new_adj_matrix[node_id][neigh_id] != -1) {
-                            gbeam2_interfaces::msg::Vertex neigh_node = graph.nodes[neigh_id];
+                    gbeam2_interfaces::msg::Vertex cl_node=graph.nodes[node_id];
+                    for (int neigh_id:graph.nodes[node_id].neighbors) {
+                        // Determine the cluster ID of the neighbor node
+                        int neigh_cluster_id = graph.nodes[neigh_id].cluster_id;
 
-                            // Determine the cluster ID of the neighbor node
-                            int neigh_cluster_id = neigh_node.cluster_id;
-                            //RCLCPP_INFO(this->get_logger(), "Neighbor node %d -> cluster ID %d", neigh_id, neigh_cluster_id);
-                            if (neigh_cluster_id == -1) {
-                                // Fallback to mapping if cluster ID is not set
-                                auto it = node_to_cluster.find(neigh_id);
-                                if (it != node_to_cluster.end()) {
-                                    neigh_cluster_id = it->second;
-                                } else {
-                                    RCLCPP_WARN(this->get_logger(),"Neighbor node %d has no cluster mapping!", neigh_id);
-                                    continue; // Skip if no mapping exists
-                                }
+                        
+                        if (neigh_cluster_id == -1) {
+                            // Fallback to mapping if cluster ID is not set
+                            auto it = node_to_cluster.find(neigh_id);
+                            if (it != node_to_cluster.end()) {
+                                neigh_cluster_id = it->second; 
+                            } else {
+                                RCLCPP_WARN(this->get_logger(),"Neighbor node %d has no cluster mapping!", neigh_id);
+                                continue; // Skip if no mapping exists
                             }
-
-                            // Increment the cluster adjacency matrix entry
-                            cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
                         }
+
+                        // Increment the cluster adjacency matrix entry
+                        cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                        RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d weight = %.6f", node_id,cl_i.cluster_id, neigh_id,neigh_cluster_id, 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length);
+
+                        
                     }
                 }
-                V_info cluster_node; cluster_node.node_id =cl_i.cluster_id; cluster_node.cluster_id =cl_i.cluster_id; cluster_node.coeff=-1.0;
-                unclustered_nodes.push_back(cluster_node);
+
+                ClusterNode_to_comm[cl_i.cluster_id] = cl_i.cluster_id;
+                ClusterNode_coeff[cl_i.cluster_id] = -1.0;
             }
 
             printMatrix(this->get_logger(),cluster_adj_matrix);
@@ -893,23 +972,22 @@ private:
             mod_gain_increase=true;
             max_iterations=0;
 
-            while (mod_gain_increase && max_iterations < 50) {
+            while (mod_gain_increase && max_iterations < 4) {
                 mod_gain_increase = false; // Reset at the beginning of each iteration
                 RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm PHASE 2.", max_iterations + 1);
 
-                // Inside the iteration loop
+                // Inside the iteration loop starting from last added clusters
                 for (int i=Graphclusters.clusters.size()-1;i>=0;i--) {
                     int candidate_id = Graphclusters.clusters[i].cluster_id;
                     RCLCPP_INFO(this->get_logger(), "Processing cluster node %d.", candidate_id);
                     int best_cl_id=-1;
                     int old_cluster_id=-1;
-                    
                     for (int neigh_id = 0; neigh_id < cluster_adj_matrix[candidate_id].size(); neigh_id++) {
                         double temp_gain;
                         if (cluster_adj_matrix[candidate_id][neigh_id] != 0.0 && candidate_id!=neigh_id) {
                             if(Graphclusters.clusters[i].nodes.size()<2){
                                 RCLCPP_INFO(this->get_logger(), "Cluster Node %d is a single node cluster and I could assign to %d", candidate_id, neigh_id);
-                                mod_gain_increase =true; 
+                                mod_gain_increase = true; 
                                 best_cl_id = neigh_id;
                                 temp_gain = cluster_adj_matrix[candidate_id][neigh_id];
                             }else{
@@ -918,10 +996,11 @@ private:
                             }
                             
 
-                            if (temp_gain > 0.0 && temp_gain > unclustered_nodes[i].coeff) {
-                                unclustered_nodes[i].coeff = temp_gain;
-                                mod_gain_increase =true; 
-                                best_cl_id = neigh_id;
+                            if (temp_gain > 0.0 && temp_gain > ClusterNode_coeff[candidate_id]) {
+                                RCLCPP_INFO(this->get_logger(), "Got best comm for cluster node %d.", candidate_id);
+                                ClusterNode_coeff[candidate_id] = temp_gain;
+                                mod_gain_increase = true; 
+                                best_cl_id = neigh_id; 
                             }
                             
 
@@ -929,16 +1008,17 @@ private:
                         }
                     }
                     
-                    
+                    RCLCPP_INFO(this->get_logger(), "Check for best comm for cluster node %d.", candidate_id);
 
                     if(best_cl_id!=-1){
-                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, unclustered_nodes[i].coeff, best_cl_id);
-                        unclustered_nodes[i].cluster_id=best_cl_id;
+                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, ClusterNode_coeff[candidate_id], best_cl_id);
+                        ClusterNode_to_comm[candidate_id] = best_cl_id;
                         // Move all the nodes of cluster to the best cluster
-                        if(Graphclusters.clusters[i].nodes.size()<3) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix);
+                        if(Graphclusters.clusters[i].nodes.size()<3) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix); //
                         printMatrix(this->get_logger(),cluster_adj_matrix);
                     
                     }
+                    RCLCPP_INFO(this->get_logger(), "END Processing cluster node %d.", candidate_id);
                 }
 
                 max_iterations++;
@@ -946,12 +1026,18 @@ private:
                 
             }
 
+            // Remove empty clusters and reassign enumeration
+            // Reassign also cluster_id for each vertex
+
             new_id=0;
             for (auto it = Graphclusters.clusters.begin(); it != Graphclusters.clusters.end();) {
                 if (!it->nodes.empty()) {
                     it->centroid = computeCentroid(*it);
                     it->cluster_id = new_id;
-                    it->is_unmergeable = (it->nodes.size() > 1);
+                    it->is_unmergeable = (it->nodes.size() > 2);
+                    for(auto& node_id:it->nodes){
+                        graph.nodes[node_id].cluster_id=new_id;
+                    }
                     ++new_id;
                     ++it;
                 } else {
@@ -1031,9 +1117,12 @@ private:
             avg_degree=0.0;
             update_batch.clear();
             cluster_state=0;
+            louvain_Com.clusters.clear();
             unclustered_nodes.clear();
             node_to_cluster.clear();
             node_to_coeff.clear();
+            ClusterNode_coeff.clear();
+            ClusterNode_to_comm.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
 
         }
