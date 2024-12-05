@@ -43,7 +43,7 @@ pkg_gazebo_ros = get_package_share_directory('gazebo_ros')
 pkg_multi_turtlebot_sim = get_package_share_directory('multi_turtlebot_sim')
 
 def generate_launch_description():
-    verbose_arg = DeclareLaunchArgument('verbose', default_value='false',
+    verbose_arg = DeclareLaunchArgument('verbose', default_value='true',
                           description='Open Gazebo in verbose mode.')
     verbose = LaunchConfiguration('verbose')
 
@@ -61,7 +61,7 @@ def generate_launch_description():
           launch_arguments = {
               'world': PathJoinSubstitution([pkg_multi_turtlebot_sim,'worlds', world_name]),
               'verbose': verbose,
-              'gui': 'false',
+              'gui': 'true',
           }.items()
     )
 

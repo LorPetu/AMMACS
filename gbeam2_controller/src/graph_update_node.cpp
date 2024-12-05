@@ -386,33 +386,61 @@ private:
             if(node_enum) graph.nodes[node.id].cluster_id =id;
             N++;
         }
-        
-
-        /*// Update adjacency matrix
-        int N = clusters.adj_matr.size;
-        clusters.adj_matr.size = N + 1;
-        std::vector<float> new_data((N + 1) * (N + 1), -1.0f);
-
-        // Copy old data to new adjacency matrix
-        for (int i = 0; i < N; ++i) {
-            for (int j = 0; j < N; ++j) {
-                new_data[i * (N + 1) + j] = clusters.adj_matr.data[i * N + j];
-            }
-        }
-
-        // Initialize new row and column
-        for (int i = 0; i < N + 1; ++i) {
-            new_data[i * (N + 1) + N] = -1.0f;  // New column
-            new_data[N * (N + 1) + i] = -1.0f;  // New row
-        }
-
-        // Replace old data with new data
-        clusters.adj_matr.data = new_data;*/
-
-
         return new_cl;
 
     }    
+
+    void computeClusterProperties(gbeam2_interfaces::msg::GraphClusterNode& it){
+        // Compute centroid and total gain for the pointer to the cluster
+        
+        //std::vector<gbeam2_interfaces::msg::GraphClusterNode, std::allocator<gbeam2_interfaces::msg::GraphClusterNode>>::iterator it
+        double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
+        double tot_gain=0.0;
+        for(auto& node_id:it.nodes){
+            sum_x += graph.nodes[node_id].x;
+            sum_y += graph.nodes[node_id].y;
+            sum_z += graph.nodes[node_id].z;
+
+            tot_gain+=graph.nodes[node_id].gain;
+        }
+        it.total_gain=tot_gain;
+
+        int count = it.nodes.size();
+        
+        if (count>0){
+            it.centroid.x = sum_x / count;
+            it.centroid.y = sum_y / count;
+            it.centroid.z = sum_z / count;
+
+        }
+        
+    }
+
+    void computeClusterProperties(std::vector<gbeam2_interfaces::msg::GraphClusterNode,std::allocator<gbeam2_interfaces::msg::GraphClusterNode>>::iterator it){
+        // Compute centroid and total gain for the pointer to the cluster
+        
+        //std::vector<gbeam2_interfaces::msg::GraphClusterNode, std::allocator<gbeam2_interfaces::msg::GraphClusterNode>>::iterator it
+        double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
+        double tot_gain=0.0;
+        for(auto& node_id:it->nodes){
+            sum_x += graph.nodes[node_id].x;
+            sum_y += graph.nodes[node_id].y;
+            sum_z += graph.nodes[node_id].z;
+
+            tot_gain+=graph.nodes[node_id].gain;
+        }
+        it->total_gain=tot_gain;
+
+        int count = it->nodes.size();
+        
+        if (count>0){
+            it->centroid.x = sum_x / count;
+            it->centroid.y = sum_y / count;
+            it->centroid.z = sum_z / count;
+
+        }
+        
+    }
 
     void addCluster(gbeam2_interfaces::msg::GraphClusterNode& cluster_toAdd){
 
@@ -487,6 +515,9 @@ private:
             std::this_thread::sleep_for(std::chrono::seconds(1));
             return;
         }
+        gbeam2_interfaces::msg::Vertex position;
+        position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
+        //poly_ptr->polygon.vertices_reachable.push_back(position);
         
         //std::is_empty<gbeam2_interfaces::msg::FreePolygonStamped>
         if(received_ext_nodes){
@@ -590,6 +621,7 @@ private:
         }
 
         auto new_adj_matrix = GraphAdj2matrix(graph.adj_matrix);
+
         int N = new_adj_matrix.size();
         double m = 0.0;
         std::vector<std::vector<float>> weight_adj_matrix(N, std::vector<float>(N, 0.0f));  // Initialize with zeros
@@ -700,6 +732,56 @@ private:
         graph.adj_matrix=matrix2GraphAdj(new_adj_matrix);
 
         // ####################################################
+        // ####### --- UPDATE CONNECTIONS AND GAINS --- #######
+        // #################################################### 
+
+        if(is_changed)
+        {
+            for(int n=0; n<graph.nodes.size(); n++)
+            {
+            if(graph.nodes[n].is_obstacle && !graph.nodes[n].is_completely_connected)
+            {
+                bool connected_left = false, connected_right = false;
+                for(int e : new_adj_matrix[n]){
+                    if(e!= -1 && graph.edges[e].is_boundary)
+                {
+                    // compute angular coefficient of the line containing normal: y=mx
+                    float m = graph.nodes[n].obstacle_normal.y/graph.nodes[n].obstacle_normal.x;
+                    // compute value of the inequality mx-y>0, evaluated for edge direction
+                    float value = m * graph.edges[e].direction.x - graph.edges[e].direction.y;
+                    if(graph.edges[e].v2 == n)
+                    value = -value;
+                    if(value>0)
+                    connected_right = true;
+                    else
+                    connected_left = true;
+                }
+
+                }
+
+
+                if (connected_left && connected_right)
+                graph.nodes[n].is_completely_connected = true;
+                is_changed = true;
+                graph.nodes[n].gain = 0;
+            }
+            }
+        }
+
+        // update exploration gain
+        //gbeam2_interfaces::msg::Vertex position;
+        //position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
+        for (int i=0; i<graph.nodes.size(); i++)
+        {
+            if (dist(position, graph.nodes[i]) < node_dist_open)
+            {
+            graph.nodes[i].gain = 0;
+            graph.nodes[i].is_visited = true;
+            is_changed = true;
+            }
+        }
+
+        // ####################################################
         // ############### --- CLUSTERING --- #################
         // ####################################################
 
@@ -714,12 +796,18 @@ private:
         V = graph.nodes.size();
         E = graph.edges.size();
 
+        auto cluster_adj_matrix = GraphAdj2matrix(Graphclusters.adj_matr);
+
+        
+        // Parameters
+        double gamma_min = 0.33; // Min percentage of variation in edge density for batch trigger
+        int N_vert_min = 3; // Min number of nodes for batch trigger
+        double min_avg_degree = 3; // Min average degree for batch trigger
+        // Check variables
         double tot_density_curr;
-        double gamma_min = 0.33;
-        int N_vert_min = 3;
-        double m_local=0.0;
+        double m_local = 0.0;
         double avg_degree = 0.0;
-        double min_avg_degree = 3;
+        
         int next_cluster_id = node_to_cluster.size(); // Declare this outside the loop or as a class member
 
         if(cluster_state==0){
@@ -734,13 +822,9 @@ private:
             }
             E_1=0;
             // Count how many edges are between nodes of this batch
-            for (int& i : update_batch)
-            {
-                for (int& j : update_batch)
-                {
-                    
-                    if(j>i && new_adj_matrix[i][j]!=-1) 
-                    {   
+            for (int& i : update_batch){
+                for (int& j : update_batch){ 
+                    if(j>i && new_adj_matrix[i][j]!=-1) {   
                         m_local+=1/graph.edges[new_adj_matrix[i][j]].length;
                         //m+= weight_adj_matrix[i][j];
                         E_1++;
@@ -765,7 +849,7 @@ private:
             if(tot_density_curr!=0.0 && std::isnan(gamma_1)){
                 gamma_1 = tot_density_curr; 
                 // If i have already enough edge density, i have already a revelant batch
-                if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1>0.5) cluster_state=2;
+                if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1>0.7) cluster_state=2;
             } else{
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=2;
             }    
@@ -784,6 +868,7 @@ private:
             int new_id = Graphclusters.clusters.size();
             auto new_cluster = createCluster(ids2VertexArray(update_batch),new_id,true);
             new_cluster.is_unmergeable=true;
+            computeClusterProperties(new_cluster);
             Graphclusters.clusters.push_back(new_cluster);
             RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
 
@@ -911,8 +996,10 @@ private:
                     it = louvain_Com.clusters.erase(it); // Erase and get the next iterator
                 }
             }
-            std::vector<std::vector<float>> cluster_adj_matrix(Graphclusters.clusters.size(), std::vector<float>(Graphclusters.clusters.size(), 0.0f));
+            std::vector<std::vector<float>> M(Graphclusters.clusters.size(), std::vector<float>(Graphclusters.clusters.size(), 0.0f));
 
+            cluster_adj_matrix= M;
+            
             for(auto& comm:louvain_Com.clusters){
                 for (auto& node_id:comm.nodes)
                 {
@@ -963,12 +1050,6 @@ private:
 
             printMatrix(this->get_logger(),cluster_adj_matrix);
 
-            /*std::sort(Graphclusters.clusters.begin(), Graphclusters.clusters.end(),
-              [](const gbeam2_interfaces::msg::GraphClusterNode& a, const gbeam2_interfaces::msg::GraphClusterNode& b) {
-                  return a.nodes.size() < b.nodes.size(); // Descending order
-              });*/
-
-
             mod_gain_increase=true;
             max_iterations=0;
 
@@ -1014,9 +1095,7 @@ private:
                         RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, ClusterNode_coeff[candidate_id], best_cl_id);
                         ClusterNode_to_comm[candidate_id] = best_cl_id;
                         // Move all the nodes of cluster to the best cluster
-                        if(Graphclusters.clusters[i].nodes.size()<3) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix); //
-                        printMatrix(this->get_logger(),cluster_adj_matrix);
-                    
+                        if(Graphclusters.clusters[i].nodes.size()<N_vert_min+1) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix); 
                     }
                     RCLCPP_INFO(this->get_logger(), "END Processing cluster node %d.", candidate_id);
                 }
@@ -1026,25 +1105,7 @@ private:
                 
             }
 
-            // Remove empty clusters and reassign enumeration
-            // Reassign also cluster_id for each vertex
-
-            new_id=0;
-            for (auto it = Graphclusters.clusters.begin(); it != Graphclusters.clusters.end();) {
-                if (!it->nodes.empty()) {
-                    it->centroid = computeCentroid(*it);
-                    it->cluster_id = new_id;
-                    it->is_unmergeable = (it->nodes.size() > 2);
-                    for(auto& node_id:it->nodes){
-                        graph.nodes[node_id].cluster_id=new_id;
-                    }
-                    ++new_id;
-                    ++it;
-                } else {
-                    RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
-                    it = Graphclusters.clusters.erase(it); // Safely remove and move the iterator
-                }
-            }
+            
       
 
             // DEBUG CLOUDPOINT 
@@ -1126,57 +1187,52 @@ private:
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
 
         }
+        // Remove empty clusters and reassign enumeration
+        // Reassign also cluster_id for each vertex
+        int new_id = 0;
+        std::vector<int> old_to_new_id(Graphclusters.clusters.size(), -1); // Map old cluster IDs to new IDs
 
-        
-        // ####################################################
-        // ####### --- UPDATE CONNECTIONS AND GAINS --- #######
-        // #################################################### 
+        for (auto it = Graphclusters.clusters.begin(); it != Graphclusters.clusters.end();) {
+            if (!it->nodes.empty()) {
+                computeClusterProperties(it); // Recompute centroid and other properties
+                it->cluster_id = new_id;
+                it->is_unmergeable = (it->nodes.size() > 2);
 
-        if(is_changed)
-        {
-            for(int n=0; n<graph.nodes.size(); n++)
-            {
-            if(graph.nodes[n].is_obstacle && !graph.nodes[n].is_completely_connected)
-            {
-                bool connected_left = false, connected_right = false;
-                for(int e : new_adj_matrix[n]){
-                    if(e!= -1 && graph.edges[e].is_boundary)
-                {
-                    // compute angular coefficient of the line containing normal: y=mx
-                    float m = graph.nodes[n].obstacle_normal.y/graph.nodes[n].obstacle_normal.x;
-                    // compute value of the inequality mx-y>0, evaluated for edge direction
-                    float value = m * graph.edges[e].direction.x - graph.edges[e].direction.y;
-                    if(graph.edges[e].v2 == n)
-                    value = -value;
-                    if(value>0)
-                    connected_right = true;
-                    else
-                    connected_left = true;
+                // Update graph node references
+                for (auto& node_id : it->nodes) {
+                    graph.nodes[node_id].cluster_id = new_id;
                 }
 
-                }
-
-
-                if (connected_left && connected_right)
-                graph.nodes[n].is_completely_connected = true;
-                is_changed = true;
-                graph.nodes[n].gain = 0;
-            }
+                old_to_new_id[it - Graphclusters.clusters.begin()] = new_id; // Map old ID to new ID
+                ++new_id;
+                ++it;
+            } else {
+                RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
+                it = Graphclusters.clusters.erase(it); // Safely remove empty clusters
             }
         }
 
-        // update exploration gain
-        gbeam2_interfaces::msg::Vertex position;
-        position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
-        for (int i=0; i<graph.nodes.size(); i++)
-        {
-            if (dist(position, graph.nodes[i]) < node_dist_open)
-            {
-            graph.nodes[i].gain = 0;
-            graph.nodes[i].is_visited = true;
-            is_changed = true;
+        // Resize the cluster adjacency matrix
+        size_t new_size = new_id; // Total number of clusters after cleanup
+        std::vector<std::vector<float>> updated_adj_matrix(new_size, std::vector<float>(new_size, 0.0));
+
+        // Rebuild the adjacency matrix using the updated cluster IDs
+        for (int i = 0; i < cluster_adj_matrix.size(); ++i) {
+            for (int j = i; j < cluster_adj_matrix[i].size(); ++j) {
+                if (old_to_new_id[i] != -1 && old_to_new_id[j] != -1) {
+                    int new_i = old_to_new_id[i];
+                    int new_j = old_to_new_id[j];
+                    updated_adj_matrix[new_i][new_j] = cluster_adj_matrix[i][j];
+                    updated_adj_matrix[new_j][new_i] = cluster_adj_matrix[i][j];
+                }
             }
         }
+
+        //printMatrix(this->get_logger(),updated_adj_matrix);
+
+        Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
+
+
 
         // publish graph if some change has occurred
         if(is_changed)
