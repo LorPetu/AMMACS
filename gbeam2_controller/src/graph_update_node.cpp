@@ -117,7 +117,7 @@ public:
         const std::shared_ptr<gbeam2_interfaces::srv::SetMappingStatus::Request> request,
         std::shared_ptr<gbeam2_interfaces::srv::SetMappingStatus::Response> response)
     {
-        //RCLCPP_INFO(this->get_logger(),"setting status -------> done");
+        RCLCPP_INFO(this->get_logger(),"setting status -------> done");
         // Assuming mapping_status is a member variable of your GraphUpdateNode class
         mapping_status = request->request;
         response->response = true;
@@ -126,7 +126,7 @@ public:
    }
 
 private:
-    bool mapping_status;
+    bool mapping_status=false;
     double node_dist_min;
     double node_dist_open;
     double node_bound_dist;
