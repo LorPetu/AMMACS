@@ -675,13 +675,17 @@ gbeam2_interfaces::msg::GraphEdge computeEdge(gbeam2_interfaces::msg::Vertex ver
 gbeam2_interfaces::msg::GraphAdjacency matrix2GraphAdj(const std::vector<std::vector<float>>& matrix)
 {
     gbeam2_interfaces::msg::GraphAdjacency adj;
-    int N = matrix.size();
-    adj.size = N;
-    adj.data.resize(N * N, 0.0f);  // Resize and initialize with zeros
+    int row = matrix.size();
 
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            adj.data[i * N + j] = matrix[i][j];
+    int col = row > 0 ? matrix[0].size() : 0;
+
+    adj.col = col;
+    adj.row = row;
+    adj.data.resize(row * col, 0.0f);  // Resize and initialize with zeros
+
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            adj.data[i * col + j] = matrix[i][j];
         }
     }
 
@@ -691,42 +695,50 @@ gbeam2_interfaces::msg::GraphAdjacency matrix2GraphAdj(const std::vector<std::ve
 std::vector<std::vector<float>> GraphAdj2matrix(const gbeam2_interfaces::msg::GraphAdjacency& adj)
 {
     int N = adj.size;
-    std::vector<std::vector<float>> matrix(N, std::vector<float>(N, 0.0f));  // Initialize with zeros
+    int row = adj.row;
+    int col = adj.col;
+    std::vector<std::vector<float>> matrix(row, std::vector<float>(col, -1.0f));  // Initialize with zeros
 
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            matrix[i][j] = adj.data[i * N + j];
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            matrix[i][j] = adj.data[i * col + j];
         }
     }
 
     return matrix;
 }
 
-void addNode(gbeam2_interfaces::msg::Graph& graph, const gbeam2_interfaces::msg::Vertex& vert)
+void addNode(gbeam2_interfaces::msg::Graph& graph, const gbeam2_interfaces::msg::Vertex& vert, const int N_robot)
 {
     // Add vertex to the graph
     graph.nodes.push_back(vert);
 
     // Update adjacency matrix
-    int N = graph.adj_matrix.size;
-    graph.adj_matrix.size = N + 1;
-    std::vector<float> new_data((N + 1) * (N + 1), -1.0f);
+    int col = graph.adj_matrix[graph.robot_id].col;
+    int row = graph.adj_matrix[graph.robot_id].row;
+    graph.adj_matrix[graph.robot_id].col = col + 1;
+    graph.adj_matrix[graph.robot_id].row = row + 1;
+    
+    std::vector<float> new_data((col + 1) * (row + 1), -1.0f);
+    //std::vector<float> empty_row(row + 1, -1.0f);
 
     // Copy old data to new adjacency matrix
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            new_data[i * (N + 1) + j] = graph.adj_matrix.data[i * N + j];
+    for(int z = 0 ; z<N_robot ; z++){
+      if(z==graph.robot_id){
+        for (int i = 0; i < row+1; ++i) { // Its own SQUARE MATRIX
+          for (int j = 0; j < col+1; ++j) {
+              new_data[i * (col + 1) + j] = (i>row || j>col) ? graph.adj_matrix[graph.robot_id].data[i * col + j]:-1.0;
+          }
         }
+      } else{
+        //graph.adj_matrix[z].data.push_back(empty_row);
+      }
     }
-
-    // Initialize new row and column
-    for (int i = 0; i < N + 1; ++i) {
-        new_data[i * (N + 1) + N] = -1.0f;  // New column
-        new_data[N * (N + 1) + i] = -1.0f;  // New row
-    }
+  
+    
 
     // Replace old data with new data
-    graph.adj_matrix.data = new_data;
+    graph.adj_matrix[graph.robot_id].data = new_data;
 }
 
 //*********************************************************************

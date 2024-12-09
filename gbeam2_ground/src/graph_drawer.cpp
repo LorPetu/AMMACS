@@ -36,6 +36,7 @@ public:
     GraphDrawer() : Node("graph_draw")
     {
         name_space = this->get_namespace();
+        name_space_id = name_space.back()- '0';
         graph_nodes_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("gbeam_visualization/graph_nodes", 1);
         graph_normals_pub = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/graph_nodes_normals", 1);
         graph_edges_pub = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/graph_edges", 1);
@@ -56,6 +57,7 @@ public:
 
 private:
     std::string name_space;
+    int  name_space_id;
 
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr graph_nodes_pub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr graph_normals_pub;

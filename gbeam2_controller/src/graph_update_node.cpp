@@ -70,6 +70,7 @@ public:
            "gbeam/set_mapping_status", std::bind(&GraphUpdateNode::setStatus, this, std::placeholders::_1, std::placeholders::_2));
 
         //Initialize parameters
+        this->declare_parameter<int>("N_robot",0);
         this->declare_parameter<double>("node_dist_min",0.0);
         this->declare_parameter<double>("node_dist_open", 0.0);
         this->declare_parameter<double>("node_bound_dist",0.0);
@@ -87,6 +88,7 @@ public:
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
         // Get parameter from yaml file
+        N_robot = this->get_parameter("N_robot").get_parameter_value().get<int>();
         node_dist_min = this->get_parameter("node_dist_min").get_parameter_value().get<double>();
         node_dist_open = this->get_parameter("node_dist_open").get_parameter_value().get<double>();
         node_bound_dist = this->get_parameter("node_bound_dist").get_parameter_value().get<double>();
@@ -109,6 +111,10 @@ public:
         RCLCPP_INFO(this->get_logger(),"7) LIMIT_XS: %f", limit_xs);
         RCLCPP_INFO(this->get_logger(),"8) LIMIT_YI: %f", limit_yi);
         RCLCPP_INFO(this->get_logger(),"9) LIMIT_YS: %f", limit_ys);
+        RCLCPP_INFO(this->get_logger(),"10) Number of robots: %d",N_robot);
+
+        //Initialize 
+        graph.adj_matrix.resize(N_robot);
 
     }    
 
@@ -143,6 +149,7 @@ private:
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
     std::string name_space;
     int name_space_id;
+    int N_robot;
 
     gbeam2_interfaces::msg::FreePolygonStamped external_nodes;
 
@@ -229,7 +236,7 @@ private:
                 vert.is_reachable = false;
                 vert.gain = 0;
             }
-            addNode(graph,vert); //add vertex to the graph
+            addNode(graph,vert,N_robot); //add vertex to the graph
             is_changed = true;
             }
             else if (vert_ext_dist< node_dist_open)
@@ -270,7 +277,7 @@ private:
                 vert.gain = 0;
             }
 
-            addNode(graph,vert);         //add vertex to the graph
+            addNode(graph,vert, N_robot);         //add vertex to the graph
             is_changed = true;
             }
             else if (vert_ext_dist< node_dist_open)
@@ -279,7 +286,7 @@ private:
             }
         }
 
-        auto new_adj_matrix = GraphAdj2matrix(graph.adj_matrix);
+        auto new_adj_matrix = GraphAdj2matrix(graph.adj_matrix[name_space_id]);
 
         // ####################################################
         // ####### ---------- ADD GRAPH EDGES --------- #######
@@ -329,6 +336,7 @@ private:
             {
                 //RCLCPP_INFO(this->get_logger()," -------> entra nell'else del secondo if (ADD GRAPH EDGES)");
                 int e = new_adj_matrix[inReachableId[i]][inReachableId[j]];
+                // DAVA SEGMENTATION FAULT QUI PERCHÈ LA MATRICE È TUTTA A 0 E NON -1
                 if(isInsideReachable(polyGlobal, graph.nodes[graph.edges[e].v1]) && isInsideReachable(polyGlobal, graph.nodes[graph.edges[e].v2]))
                 graph.edges[e].is_walkable = true;
             }
@@ -364,7 +372,7 @@ private:
         }
         
 
-        graph.adj_matrix=matrix2GraphAdj(new_adj_matrix);
+        graph.adj_matrix[name_space_id]=matrix2GraphAdj(new_adj_matrix);
 
         // ####################################################
         // ####### --- UPDATE CONNECTIONS AND GAINS --- #######
