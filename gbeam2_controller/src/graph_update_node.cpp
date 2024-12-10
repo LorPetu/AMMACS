@@ -27,6 +27,7 @@
 #include "gbeam2_interfaces/msg/graph_edge.hpp"
 #include "gbeam2_interfaces/msg/poly_area.hpp"
 #include "gbeam2_interfaces/msg/graph.hpp"
+#include "gbeam2_interfaces/msg/ext_graph_update.hpp"
 
 #include "gbeam2_interfaces/srv/set_mapping_status.hpp"
 
@@ -61,7 +62,7 @@ public:
         graph_pub_ =this->create_publisher<gbeam2_interfaces::msg::Graph>(
           "gbeam/reachability_graph",1);
 
-        external_poly_sub_ = this->create_subscription<gbeam2_interfaces::msg::FreePolygonStamped>(
+        external_poly_sub_ = this->create_subscription<gbeam2_interfaces::msg::ExtGraphUpdate>(
             "external_nodes", 1, std::bind(&GraphUpdateNode::extNodesCallback, this, std::placeholders::_1));
 
         
@@ -157,12 +158,16 @@ private:
 
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr graph_pub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr poly_sub_;
-    rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr external_poly_sub_;
+    rclcpp::Subscription<gbeam2_interfaces::msg::ExtGraphUpdate>::SharedPtr external_poly_sub_;
     rclcpp::Service<gbeam2_interfaces::srv::SetMappingStatus>::SharedPtr status_server_;
 
-    void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::FreePolygonStamped> received_nodes){
+    void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::ExtGraphUpdate> update){
         // Each time i receive external nodes I store them 
-        external_nodes = *received_nodes;
+        external_nodes = update->polygon; 
+        for(int z=0; z>graph.adj_matrix.size();z++){
+            if(z!=name_space_id) GraphAdj2GraphAdjTranspose(update->adj_matrix[z]);
+        }
+
         received_ext_nodes = true;
     }
 

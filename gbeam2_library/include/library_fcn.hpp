@@ -173,6 +173,12 @@ gbeam2_interfaces::msg::GraphAdjacency matrix2GraphAdj(const std::vector<std::ve
 
 std::vector<std::vector<float>> GraphAdj2matrix(const gbeam2_interfaces::msg::GraphAdjacency& adj);
 
+gbeam2_interfaces::msg::GraphAdjacency matrixTranspose2GraphAdj(const std::vector<std::vector<float>>& matrix);
+
+std::vector<std::vector<float>> GraphAdj2matrixTranspose(const gbeam2_interfaces::msg::GraphAdjacency& adj);
+
+gbeam2_interfaces::msg::GraphAdjacency GraphAdj2GraphAdjTranspose(const gbeam2_interfaces::msg::GraphAdjacency& adj);
+
 void addNode(gbeam2_interfaces::msg::Graph& graph, const gbeam2_interfaces::msg::Vertex& vert, const int N_robot);
 
 

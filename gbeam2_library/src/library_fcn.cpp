@@ -694,7 +694,6 @@ gbeam2_interfaces::msg::GraphAdjacency matrix2GraphAdj(const std::vector<std::ve
 
 std::vector<std::vector<float>> GraphAdj2matrix(const gbeam2_interfaces::msg::GraphAdjacency& adj)
 {
-    int N = adj.size;
     int row = adj.row;
     int col = adj.col;
     std::vector<std::vector<float>> matrix(row, std::vector<float>(col, -1.0f));  // Initialize with zeros
@@ -707,6 +706,102 @@ std::vector<std::vector<float>> GraphAdj2matrix(const gbeam2_interfaces::msg::Gr
 
     return matrix;
 }
+
+gbeam2_interfaces::msg::GraphAdjacency GraphAdj2GraphAdjTranspose(const gbeam2_interfaces::msg::GraphAdjacency& adj)
+{
+    // Validate input
+    if (adj.data.empty()) {
+        gbeam2_interfaces::msg::GraphAdjacency empty_adj;
+        empty_adj.row = 0;
+        empty_adj.col = 0;
+        return empty_adj;
+    }
+
+    // Create new GraphAdjacency message for transpose
+    gbeam2_interfaces::msg::GraphAdjacency transposed_adj;
+    
+    // Swap dimensions for transpose
+    transposed_adj.row = adj.col;
+    transposed_adj.col = adj.row;
+    
+    // Resize data vector
+    transposed_adj.data.resize(adj.data.size(), 0.0f);
+
+    // Perform transpose
+    for (int i = 0; i < adj.row; ++i) {
+        for (int j = 0; j < adj.col; ++j) {
+            // Original: data[i * col + j]
+            // Transposed: data[j * row + i]
+            transposed_adj.data[j * adj.row + i] = adj.data[i * adj.col + j];
+        }
+    }
+
+    return transposed_adj;
+}
+
+
+gbeam2_interfaces::msg::GraphAdjacency matrixTranspose2GraphAdj(const std::vector<std::vector<float>>& matrix)
+{   
+    // Get the transpose of a Matrix and get the corresponding GraphAdjacency msg 
+    gbeam2_interfaces::msg::GraphAdjacency adj;
+    
+    // Check if matrix is empty
+    if (matrix.empty()) {
+        adj.row = 0;
+        adj.col = 0;
+        return adj;
+    }
+
+    // Check for consistent row lengths
+    size_t row = matrix[0].size();
+    size_t col = matrix.size();
+
+    // Validate matrix consistency
+    for (const auto& vec : matrix) {
+        if (vec.size() != row) {
+            throw std::invalid_argument("Matrix rows have inconsistent lengths");
+        }
+    }
+
+    adj.col = col;  // Number of columns is now the original matrix's rows
+    adj.row = row;  // Number of rows is now the original matrix's columns
+    adj.data.resize(row * col, 0.0f);  // Resize and initialize with zeros
+
+    // Perform actual matrix transpose
+    for (size_t i = 0; i < row; ++i) {
+        for (size_t j = 0; j < col; ++j) {
+            adj.data[i * col + j] = matrix[j][i];  // Swap indices to transpose
+        }
+    }
+
+    return adj;
+}
+
+std::vector<std::vector<float>> GraphAdj2matrixTranspose(const gbeam2_interfaces::msg::GraphAdjacency& adj)
+{
+    // Validate input
+    if (adj.data.empty()) {
+        return {};
+    }
+
+    // Note the swapped dimensions for transpose
+    int row = adj.col;  // Original columns become rows of transpose
+    int col = adj.row;  // Original rows become columns of transpose
+
+    // Create matrix with correct dimensions
+    std::vector<std::vector<float>> transposed_matrix(row, std::vector<float>(col, 0.0f));
+
+    // Perform transpose conversion
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            // Swap indices to create transpose
+            transposed_matrix[i][j] = adj.data[j * row + i];
+        }
+    }
+
+    return transposed_matrix;
+}
+
 
 void addNode(gbeam2_interfaces::msg::Graph& graph, const gbeam2_interfaces::msg::Vertex& vert, const int N_robot)
 {
@@ -731,12 +826,16 @@ void addNode(gbeam2_interfaces::msg::Graph& graph, const gbeam2_interfaces::msg:
           }
         }
       } else{
+        int ext_row = graph.adj_matrix[z].row;
+        int ext_col = graph.adj_matrix[z].col;
+        std::vector<float> new_ext_data((ext_col) * (ext_row + 1), -1.0f);
+        graph.adj_matrix[z].row = ext_row+1;
+        for(int j=0; j<graph.adj_matrix[z].col; j++){
+           new_ext_data[(ext_row +1)* (ext_col + 1) + j] = -1.0; //(j>col) ? graph.adj_matrix[graph.robot_id].data[i * col + j]:
+        }
         //graph.adj_matrix[z].data.push_back(empty_row);
       }
     }
-  
-    
-
     // Replace old data with new data
     graph.adj_matrix[graph.robot_id].data = new_data;
 }

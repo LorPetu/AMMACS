@@ -19,6 +19,7 @@
 #include "gbeam2_interfaces/msg/graph.hpp"
 #include "gbeam2_interfaces/msg/free_polygon.hpp"
 #include "gbeam2_interfaces/msg/free_polygon_stamped.hpp"
+#include "gbeam2_interfaces/msg/ext_graph_update.hpp"
 
 #include "tf2/exceptions.h"
 #include "tf2_ros/buffer.h"
@@ -55,7 +56,7 @@ public:
     // PUBLISHING TOPICS
     merged_graph_pub_ = this->create_publisher<gbeam2_interfaces::msg::Graph>(
                 "gbeam/merged_graph", 1);
-    fake_poly_pub_ = this->create_publisher<gbeam2_interfaces::msg::FreePolygonStamped>(
+    fake_poly_pub_ = this->create_publisher<gbeam2_interfaces::msg::ExtGraphUpdate>(
                 "external_nodes", 1);
     timer_pub_ =this->create_publisher<std_msgs::msg::Float32MultiArray>(
                 "timers",1);
@@ -152,7 +153,7 @@ private:
 
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_subscriber_;
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr merged_graph_pub_;
-    rclcpp::Publisher<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr fake_poly_pub_;
+    rclcpp::Publisher<gbeam2_interfaces::msg::ExtGraphUpdate>::SharedPtr fake_poly_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr timer_pub_;
     rclcpp::Service<gbeam2_interfaces::srv::GraphUpdate>::SharedPtr  graph_updates_service_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr start_merger_service_;
@@ -170,6 +171,7 @@ private:
     std::condition_variable cv_;
     bool data_received_ = false;
     gbeam2_interfaces::srv::GraphUpdate::Response updateResponse;
+    gbeam2_interfaces::msg::ExtGraphUpdate external_updates;
 
 
     std::vector<std::shared_ptr<gbeam2_interfaces::msg::Graph>> curr_updateBuffer;
@@ -240,7 +242,9 @@ private:
             updateResponse.success = false;
             
             // Publish the fake polygon
-            fake_poly_pub_->publish(fake_poly);
+            external_updates.polygon= fake_poly;
+            external_updates.adj_matrix = request->update_request.adj_matrix;
+            fake_poly_pub_->publish(external_updates);
 
             // Wait for the update to be processed with a timeout
             auto timeout = std::chrono::seconds(5); // Adjust the timeout as needed
