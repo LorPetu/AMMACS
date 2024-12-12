@@ -90,7 +90,7 @@ public:
     RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF PARTIAL_GRAPH_MERGER: ############# ");
     RCLCPP_INFO(this->get_logger(),"############# (for %s) ############# ",name_space.c_str());
     RCLCPP_INFO(this->get_logger(),"1) Number of robots: %d",N_robot);
-    RCLCPP_INFO(this->get_logger(),"1) Number of robots: %f",wifi_range);
+    RCLCPP_INFO(this->get_logger(),"2) Wifi Range: %f",wifi_range);
     // Initialize vectors with the correct size
     curr_updateBuffer.resize(N_robot);
     prev_updateBuffer.resize(N_robot);
