@@ -10,6 +10,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 
 
@@ -32,6 +33,10 @@ public:
             name_space+"/gbeam/gbeam_pos_ref", 1, std::bind(&PositionController::refPosCallback, this, std::placeholders::_1));
 
         cmd_vel_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);
+
+        start_moving_service_ = this->create_service<std_srvs::srv::SetBool>(
+            "gbeam/start_moving",std::bind(&PositionController::startMoving,this, std::placeholders::_1, std::placeholders::_2));
+
 
         //******************** GET PARAMETERS **************************
         this->declare_parameter<float>("k_rho", 0.0);
@@ -71,6 +76,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_publisher_;
 
     std::string name_space;
+    bool start_moving = true;
 
     sensor_msgs::msg::LaserScan scan_;
     nav_msgs::msg::Odometry robot_odom_;
@@ -78,6 +84,21 @@ private:
     bool pos_ref_received = false;
 
     rclcpp::TimerBase::SharedPtr timer_;
+
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr start_moving_service_;
+
+    void startMoving(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response){
+        start_moving=request->data;
+        if(start_moving){
+            response->success = true;
+            response->message = "Start exploring for " + name_space;
+        }else{
+            response->success = false;
+            response->message = "Stop exploring for" + name_space;
+
+        }      
+
+    }
 
     void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr scan_ptr)
     {
@@ -105,6 +126,7 @@ private:
 
     void controlLoop()
     {
+        if(!start_moving) return;
         geometry_msgs::msg::Twist cmd_vel;
 
         if(pos_ref_received){

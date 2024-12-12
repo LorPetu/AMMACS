@@ -13,7 +13,7 @@
 
 /**/poly_gen:
   ros__parameters:
-    update_freq: 10.0 # Hz     #2.0
+    update_freq: 5.0 # Hz     #2.0
     num_vertices: 6        # 6
     dist_step: 0.05  # m     #0.1
     start_dist: 0.15 #0.15  # m
@@ -26,6 +26,7 @@
     node_dist_open: 0.3
     node_bound_dist: 0.2
     obstacle_margin: 0.05 #0.05
+    max_lenght_edge: 1.0 #At least 3x node_dist_open
 
 
 /**/graph_expl:

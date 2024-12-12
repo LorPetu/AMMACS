@@ -1,0 +1,2 @@
+gbeam2_interfaces/GraphClusterNode[] clusters
+gbeam2_interfaces/GraphAdjacency adj_matr

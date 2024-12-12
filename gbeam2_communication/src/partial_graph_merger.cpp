@@ -220,7 +220,7 @@ private:
             int req_robot_id = request->update_request.robot_id;
             if(name_space_id==req_robot_id) return;
             std::unique_lock<std::mutex> lock(mutex_);
-            RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Service call received from %d", name_space_id, req_robot_id);
+            //RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Service call received from %d", name_space_id, req_robot_id);
             //RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
 
             std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character
@@ -253,7 +253,7 @@ private:
 
                 prev_updateBuffer[req_robot_id]=curr_updateBuffer[req_robot_id];
                 response->success = updateResponse.success;
-                RCLCPP_WARN(this->get_logger(), "SERVER [%d]: Data received from %d has been processed by graph_update", name_space_id, req_robot_id);
+                //RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Data received from %d has been processed by graph_update", name_space_id, req_robot_id);
             
             } else {
                 // Timeout occurred
@@ -290,7 +290,7 @@ private:
             updateResponse.success = true;
             data_received_ = true;
             cv_.notify_one();
-            RCLCPP_INFO(this->get_logger(), "Processing update considering nodes from %d...", graph->last_updater_id);
+            //RCLCPP_INFO(this->get_logger(), "Processing update considering nodes from %d...", graph->last_updater_id);
         } else {
             // This is our own update, publish it
             //RCLCPP_INFO(this->get_logger(), "Publishing on my own topic...");
@@ -299,7 +299,7 @@ private:
     }
 
     void timeoutCallback(int timer_index){
-        RCLCPP_INFO(this->get_logger(),"Expired time for robot%d ...", timer_index);        
+        //RCLCPP_INFO(this->get_logger(),"Expired time for robot%d ...", timer_index);        
         timers_CLIENTS[timer_index]->reset();//cancel();
     }
 
@@ -314,7 +314,7 @@ private:
                 if(trigger_time> lb_time && trigger_time<up_time){
                     //send a request
 
-                    RCLCPP_INFO(this->get_logger(),"CLIENT[%d]: Send a request to %ld ...",name_space_id,i);
+                    //RCLCPP_INFO(this->get_logger(),"CLIENT[%d]: Send a request to %ld ...",name_space_id,i);
 
                     std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Request> request_ = std::make_shared<gbeam2_interfaces::srv::GraphUpdate::Request>();
 
@@ -326,7 +326,7 @@ private:
                     RCLCPP_ERROR(this->get_logger(), "CLIENT[%d]: Interrupted while waiting for the service. Exiting.", name_space_id);
                     return;
                     }
-                    RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: service not available, waiting again...", name_space_id);
+                    //RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: service not available, waiting again...", name_space_id);
                     }*/
 
                     using ServiceResponseFuture =
@@ -343,7 +343,7 @@ private:
                     
                     std::future_status status = result_future.wait_for(2s);  // timeout to guarantee a graceful finish
                     if (status == std::future_status::ready) {
-                        RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: Received response from %d",name_space_id,i);        
+                        //RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: Received response from %d",name_space_id,i);        
                         timers_CLIENTS[i]->reset();
                     }
 

@@ -20,13 +20,12 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(gbeam2_interfaces REQUIRED)
 find_package(gbeam2_library REQUIRED)
 
-install(DIRECTORY config
-  DESTINATION share/${PROJECT_NAME}/
-)
+
 
 # Definisci gli eseguibili dei nodi
 add_executable(poly_drawer src/poly_drawer.cpp)
 add_executable(graph_drawer src/graph_drawer.cpp)
+add_executable(communication_drawer src/communication_drawer.cpp)
 
 set(my_dep
   "rclcpp"
@@ -44,6 +43,7 @@ set(my_dep
 
 ament_target_dependencies(poly_drawer PUBLIC ${my_dep})
 ament_target_dependencies(graph_drawer PUBLIC ${my_dep})
+ament_target_dependencies(communication_drawer PUBLIC ${my_dep})
 
 
 #target_include_directories(poly_drawer PUBLIC
@@ -51,7 +51,11 @@ ament_target_dependencies(graph_drawer PUBLIC ${my_dep})
 #  $<INSTALL_INTERFACE:include>)
 #target_compile_features(poly_drawer PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
-install(TARGETS poly_drawer graph_drawer
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+install(TARGETS poly_drawer graph_drawer communication_drawer
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch

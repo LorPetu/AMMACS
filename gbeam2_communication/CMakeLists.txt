@@ -18,6 +18,7 @@ set(DEPENDANCIES
   "nav_msgs"
   "visualization_msgs"
   "gbeam2_interfaces"
+  "tf2"
   "tf2_ros"
   "tf2_geometry_msgs"
   "gbeam2_library"

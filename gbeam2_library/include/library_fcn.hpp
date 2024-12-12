@@ -64,6 +64,8 @@ geometry_msgs::msg::Point32 movePoint(geometry_msgs::msg::Point32 p, geometry_ms
 // Return the distance between point a and b
 float distSq(geometry_msgs::msg::Point32 a, geometry_msgs::msg::Point32 b);
 
+float distSq(geometry_msgs::msg::Point a, geometry_msgs::msg::Point b);
+
 // Return the distance between vertices a and b
 float distSq(gbeam2_interfaces::msg::Vertex a, gbeam2_interfaces::msg::Vertex b);
 
@@ -214,5 +216,8 @@ gbeam2_interfaces::msg::Graph graph_transform(const gbeam2_interfaces::msg::Grap
 
 std::pair<gbeam2_interfaces::msg::Graph, gbeam2_interfaces::msg::FreePolygonStamped> 
 graph_transform_and_get_fakepoly(const gbeam2_interfaces::msg::Graph& graph, const geometry_msgs::msg::TransformStamped& tf);
+
+gbeam2_interfaces::msg::FreePolygonStamped
+get_obstacles_and_reachable_nodes(const gbeam2_interfaces::msg::Graph::SharedPtr graph);
 
 #endif  // LIBRARY_HPP

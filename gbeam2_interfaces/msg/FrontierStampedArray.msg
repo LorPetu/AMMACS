@@ -1,0 +1,1 @@
+gbeam2_interfaces/FrontierStamped[]	frontiers

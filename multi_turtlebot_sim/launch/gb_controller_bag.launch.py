@@ -6,6 +6,7 @@ from launch.substitutions import FindExecutable, LaunchConfiguration
 from launch.actions import LogInfo, RegisterEventHandler, ExecuteProcess, IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.event_handlers import OnProcessStart, OnProcessIO
+from launch.substitutions import PythonExpression
 
 ## Launch file description
 # This launch file starts the visualization part of gbeam2_ground within rviz2
@@ -17,66 +18,49 @@ def generate_launch_description():
     robot_prefix_arg = DeclareLaunchArgument('robot_prefix', default_value='')
     robot_prefix = LaunchConfiguration('robot_prefix')
     
-
-    graph_merger = Node(
-        package='gbeam2_communication',
-        name='partial_graph_merger',
-        executable='partial_graph_merger',
-        namespace=robot_prefix,
-        parameters=[os.path.join(
-    get_package_share_directory('gbeam2_communication'),
+    config = os.path.join(
+    get_package_share_directory('gbeam2_controller'),
     'config',
-    'communication_param.yaml'
-    )]
-    )
-    status_node = Node(
-        package='gbeam2_communication',
-        name='statusTX_node',
-        executable='status_transmitter',
-        namespace=robot_prefix,
-        parameters=[os.path.join(
-    get_package_share_directory('gbeam2_communication'),
-    'config',
-    'communication_param.yaml'
-    )]
+    'global_param.yaml'
     )
 
-    coop_node = Node(
-        package='gbeam2_cooperation',
-        name='coop_manager',
-        executable='cooperation_manager',
-        namespace=robot_prefix,
-        parameters=[os.path.join(
-    get_package_share_directory('gbeam2_cooperation'),
-    'config',
-    'cooperation_param.yaml'
-    )]
-    )
-    
-    ddrive = Node(
-        package='gbeam2_simulator',
-        name="pos_contr",
-        executable='ddrive_position',
-        namespace=robot_prefix,
-        parameters=[os.path.join(
-    get_package_share_directory('gbeam2_simulator'),
-    'config',
-    'ddrive_param.yaml'
-    )]
+    world_static_tf = ExecuteProcess( 
+        cmd=[[
+            # executable
+            'ros2 run tf2_ros static_transform_publisher ',
+            # parameters
+            '0 0 0 0 0 0 world ',
+            PythonExpression(["'/", LaunchConfiguration('robot_prefix'), "/odom'"])
+        ]],
+        shell=True
     )
 
+    play_bag = ExecuteProcess( 
+        cmd=[[
+            # executable
+            'ros2 bag play /home/lor/GBEAM2_MultiUAV/subset',
+        ]],
+        shell=True
+    )
 
+    graph_update=Node(
+        package = 'gbeam2_controller',
+        name = 'graph_update',                  
+        executable = 'graph_update_node',
+        parameters = [config],
+        namespace=robot_prefix,
+        # depends_on = ['poly_gen']
+    )
 
 
     ld = LaunchDescription(
         [
-        ddrive,       
-        graph_merger,
-        status_node,
-        coop_node
+        world_static_tf,
+        graph_update,
+        play_bag,
+
         ]
     )
-
 
     config_ground = os.path.join(
         get_package_share_directory('gbeam2_ground'),
@@ -107,13 +91,7 @@ def generate_launch_description():
         parameters = [config_ground]
     ))
 
-    ld.add_action(
-        Node(
-        package = 'gbeam2_ground',
-        name = 'comm_drawer',                  
-        executable = 'communication_drawer',
-        parameters = [config_ground]
-    ))
+
 
     ld.add_action(robot_prefix_arg)
 

@@ -84,6 +84,11 @@ float distSq(geometry_msgs::msg::Point32 a, geometry_msgs::msg::Point32 b)
 {
   return (pow(a.x-b.x,2)+pow(a.y-b.y,2)+pow(a.z-b.z,2));
 }
+// Return the distance between point a and b
+float distSq(geometry_msgs::msg::Point a, geometry_msgs::msg::Point b)
+{
+  return (pow(a.x-b.x,2)+pow(a.y-b.y,2)+pow(a.z-b.z,2));
+}
 // Return the distance between vertices a and b
 float distSq(gbeam2_interfaces::msg::Vertex a, gbeam2_interfaces::msg::Vertex b)
 {
@@ -593,6 +598,24 @@ graph_transform_and_get_fakepoly(const gbeam2_interfaces::msg::Graph& graph, con
     }
 
     return std::make_pair(transformed_graph, graph_polygon);
+}
+
+gbeam2_interfaces::msg::FreePolygonStamped
+get_obstacles_and_reachable_nodes(const gbeam2_interfaces::msg::Graph::SharedPtr graph)
+{
+    gbeam2_interfaces::msg::FreePolygonStamped graph_polygon;
+
+    // Transform nodes and populate the polygon
+    for (const auto node : graph->nodes)
+    {
+        if (node.is_obstacle) {
+            graph_polygon.polygon.vertices_obstacles.push_back(node);
+        } else if (node.is_reachable) {
+            graph_polygon.polygon.vertices_reachable.push_back(node);
+        }
+    }
+
+    return graph_polygon;
 }
 
 // check if vertex v is inside polytope polygon

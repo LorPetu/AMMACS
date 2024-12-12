@@ -34,6 +34,7 @@
 
 #include "visualization_msgs/msg/marker.hpp"
 #include "std_msgs/msg/color_rgba.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 #include "library_fcn.hpp"
 
@@ -48,7 +49,6 @@ public:
 
         pos_ref_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
             "gbeam/gbeam_pos_ref", 1);
-
     
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -199,6 +199,7 @@ private:
 }
         
     void explorationCallback(){
+        
         geometry_msgs::msg::TransformStamped l2g_tf;
 
         std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character

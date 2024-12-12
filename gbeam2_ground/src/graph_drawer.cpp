@@ -20,6 +20,8 @@
 #include "gbeam2_interfaces/msg/graph_edge.hpp"
 #include "gbeam2_interfaces/msg/poly_area.hpp"
 #include "gbeam2_interfaces/msg/graph.hpp"
+#include "gbeam2_interfaces/msg/graph_cluster.hpp"
+#include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
 
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
@@ -40,10 +42,16 @@ public:
         graph_normals_pub = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/graph_nodes_normals", 1);
         graph_edges_pub = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/graph_edges", 1);
         graph_node_labels_pub = this->create_publisher<visualization_msgs::msg::MarkerArray>("gbeam_visualization/graph_node_labels", 1);
+        cluster_nodes_pub_= this->create_publisher<visualization_msgs::msg::MarkerArray>("gbeam_visualization/clusters/centroids",1);
+        cluster_edges_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/clusters/edges",1);
 
         graph_sub = this->create_subscription<gbeam2_interfaces::msg::Graph>(
             "gbeam/reachability_graph", 1,
             std::bind(&GraphDrawer::graphCallback, this, std::placeholders::_1));
+
+        cluster_graph_sub = this->create_subscription<gbeam2_interfaces::msg::GraphCluster>(
+            "gbeam/clusters", 1,
+            std::bind(&GraphDrawer::ClusterCallback, this, std::placeholders::_1));
 
         this->declare_parameter<float>("scaling", 0.0);
 
@@ -62,6 +70,10 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr graph_edges_pub;
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_sub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr graph_node_labels_pub;
+
+    rclcpp::Subscription<gbeam2_interfaces::msg::GraphCluster>::SharedPtr cluster_graph_sub;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr cluster_edges_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr cluster_nodes_pub_;  
 
     float scaling;
      sensor_msgs::msg::PointCloud2 pointCloudTOpointCloud2(const sensor_msgs::msg::PointCloud msg)
@@ -265,6 +277,110 @@ private:
         graph_normals_pub->publish(nodes_normals);
         graph_edges_pub->publish(edges_markers);
         graph_node_labels_pub->publish(text_markers);
+    }
+
+    void HSVtoRGB(float h, float s, float v, float& r, float& g, float& b) {
+        float c = v * s; // Chroma
+        float x = c * (1 - std::fabs(std::fmod(h / 60.0, 2) - 1));
+        float m = v - c;
+
+        if (h >= 0 && h < 60) {
+            r = c, g = x, b = 0;
+        } else if (h >= 60 && h < 120) {
+            r = x, g = c, b = 0;
+        } else if (h >= 120 && h < 180) {
+            r = 0, g = c, b = x;
+        } else if (h >= 180 && h < 240) {
+            r = 0, g = x, b = c;
+        } else if (h >= 240 && h < 300) {
+            r = x, g = 0, b = c;
+        } else {
+            r = c, g = 0, b = x;
+        }
+
+        r += m;
+        g += m;
+        b += m;
+    }
+
+
+    void ClusterCallback(const gbeam2_interfaces::msg::GraphCluster::SharedPtr cluster_graph_ptr){
+
+        double gain_scale = 0.005;
+        double cluster_height = 5.0;
+        std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character
+        visualization_msgs::msg::MarkerArray centroid_points;
+        visualization_msgs::msg::Marker edges_markers;
+        edges_markers.type = visualization_msgs::msg::Marker::LINE_LIST;
+        edges_markers.id=2; edges_markers.header.frame_id =target_frame;
+        edges_markers.ns="clusters_e";
+        edges_markers.scale.x = 0.05 * scaling;
+
+        std_msgs::msg::ColorRGBA walkable_color;
+        walkable_color.r = 1, walkable_color.g = 0.1, walkable_color.b = 0.8, walkable_color.a = 0.15;
+
+        
+        // Draw each centroid of the cluster
+        for (auto& cluster : cluster_graph_ptr->clusters) {
+            // Nodes belonging to that cluster
+            visualization_msgs::msg::Marker marker;
+
+            marker.header.frame_id = target_frame;
+            marker.ns = "cluster_centroid";
+            marker.id = cluster.cluster_id;
+            marker.type = visualization_msgs::msg::Marker::CYLINDER;
+
+            marker.action = visualization_msgs::msg::Marker::ADD;
+
+            marker.pose.position.x = cluster.centroid.x;
+            marker.pose.position.y = cluster.centroid.y;
+            marker.pose.position.z = cluster_height;
+            //scale.x is diameter in x direction, 
+            //scale.y in y direction, by setting these to different values you get an ellipse instead of a circle. 
+            //Use scale.z to specify the height.
+            marker.scale.x = 0.3;
+            marker.scale.y = 0.3;
+            marker.scale.z = cluster.total_gain*gain_scale;
+
+            // Assign a rainbow color to each marker
+            float hue = 360.0f * (static_cast<float>(cluster.cluster_id) / static_cast<float>(cluster_graph_ptr->clusters.size())); // Normalize hue [0, 360]
+            float r, g, b;
+            HSVtoRGB(hue, 1.0f, 1.0f, r, g, b); // Convert HSV to RGB (1.0f for full saturation and value)
+
+            marker.color.r = r;
+            marker.color.g = g;
+            marker.color.b = b;
+
+            marker.color.a=1.0;
+
+            centroid_points.markers.push_back(marker);
+        }
+        
+        auto adj_matrix=GraphAdj2matrix(cluster_graph_ptr->adj_matr);
+        
+        for (int i = 0; i < adj_matrix.size(); i++)
+        {
+            for (int j = i+1; j < adj_matrix.size(); j++)
+            {
+               if(adj_matrix[i][j]!=0.0){
+                gbeam2_interfaces::msg::Vertex centr_i = cluster_graph_ptr->clusters[i].centroid;
+                centr_i.z = cluster_height;
+                gbeam2_interfaces::msg::Vertex centr_j = cluster_graph_ptr->clusters[j].centroid;
+                centr_j.z = cluster_height;
+                edges_markers.points.push_back(vertex2point(centr_i));
+                edges_markers.points.push_back(vertex2point(centr_j));
+
+                edges_markers.colors.push_back(walkable_color);
+                edges_markers.colors.push_back(walkable_color);
+
+               }
+            }
+            
+        }        
+
+        cluster_nodes_pub_->publish(centroid_points);
+        cluster_edges_pub_->publish(edges_markers);
+
     }
 };
 
