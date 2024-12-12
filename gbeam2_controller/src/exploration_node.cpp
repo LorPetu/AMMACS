@@ -74,13 +74,13 @@ public:
         limit_yi = this->get_parameter("limit_yi").get_parameter_value().get<double>();
         limit_ys = this->get_parameter("limit_ys").get_parameter_value().get<double>();
 
-        RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF EXPLORATION NODE: ############# ");
-        RCLCPP_INFO(this->get_logger(),"1) REACHED_TOL: %f", reached_tol);
-        RCLCPP_INFO(this->get_logger(),"2) DISTANCE_EXP: %f", distance_exp);
-        RCLCPP_INFO(this->get_logger(),"3) LIMIT_XI: %f", limit_xi);
-        RCLCPP_INFO(this->get_logger(),"4) LIMIT_XS: %f", limit_xs);
-        RCLCPP_INFO(this->get_logger(),"5) LIMIT_YI: %f", limit_yi);
-        RCLCPP_INFO(this->get_logger(),"6) LIMIT_YS: %f", limit_ys);
+        //RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF EXPLORATION NODE: ############# ");
+        //RCLCPP_INFO(this->get_logger(),"1) REACHED_TOL: %f", reached_tol);
+        //RCLCPP_INFO(this->get_logger(),"2) DISTANCE_EXP: %f", distance_exp);
+        //RCLCPP_INFO(this->get_logger(),"3) LIMIT_XI: %f", limit_xi);
+        //RCLCPP_INFO(this->get_logger(),"4) LIMIT_XS: %f", limit_xs);
+        //RCLCPP_INFO(this->get_logger(),"5) LIMIT_YI: %f", limit_yi);
+        //RCLCPP_INFO(this->get_logger(),"6) LIMIT_YS: %f", limit_ys);
         
       //---------------------------------------------
     
@@ -162,9 +162,9 @@ private:
         }
     }
 
-    RCLCPP_INFO(this->get_logger(), "Target node (best): %d", best_node);
+    //RCLCPP_INFO(this->get_logger(), "Target node (best): %d", best_node);
 
-    RCLCPP_INFO(this->get_logger(), "Computing path from %d to %d", last_target, best_node);
+    //RCLCPP_INFO(this->get_logger(), "Computing path from %d to %d", last_target, best_node);
     std::vector<int> path;
     try {
         path = dijkstra(graph, last_target, best_node);
@@ -177,7 +177,7 @@ private:
     for (int node : path) {
         path_str += std::to_string(node) + "-";
     }
-    RCLCPP_INFO(this->get_logger(), "New path is: %s", path_str.c_str());
+    //RCLCPP_INFO(this->get_logger(), "New path is: %s", path_str.c_str());
 
     if (path.size() > 1) {
         last_target = path[1];
@@ -205,7 +205,7 @@ private:
         std::string source_frame = name_space.substr(1, name_space.length()-1) + "/base_scan";
         try {
             
-            //RCLCPP_INFO(this->get_logger(), "lookupTransform -------> %s to %s", target_frame.c_str(), source_frame.c_str());
+            ////RCLCPP_INFO(this->get_logger(), "lookupTransform -------> %s to %s", target_frame.c_str(), source_frame.c_str());
             l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, tf2::TimePointZero);
         } catch (const tf2::TransformException & ex) {
             RCLCPP_WARN(
@@ -222,11 +222,11 @@ private:
         if(N>0)
         {
             if(last_target < 0){
-                //RCLCPP_INFO(this->get_logger(),"last_target initial value: %d",last_target);
+                ////RCLCPP_INFO(this->get_logger(),"last_target initial value: %d",last_target);
                 last_target = 0, computeNewTarget();
             }else{
                 if(dist(last_target_vertex, position) <= reached_tol){ 
-                    //RCLCPP_INFO(this->get_logger(),"last_target reached value: %d",last_target);
+                    ////RCLCPP_INFO(this->get_logger(),"last_target reached value: %d",last_target);
                     computeNewTarget();
                 }      
             }

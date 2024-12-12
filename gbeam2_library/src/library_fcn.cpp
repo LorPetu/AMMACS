@@ -709,13 +709,13 @@ std::vector<std::vector<float>> GraphAdj2matrix(const gbeam2_interfaces::msg::Gr
 
 gbeam2_interfaces::msg::GraphAdjacency GraphAdj2GraphAdjTranspose(const gbeam2_interfaces::msg::GraphAdjacency& adj)
 {
-    // Validate input
+    /*// Validate input
     if (adj.data.empty()) {
         gbeam2_interfaces::msg::GraphAdjacency empty_adj;
         empty_adj.row = 0;
         empty_adj.col = 0;
         return empty_adj;
-    }
+    }*/
 
     // Create new GraphAdjacency message for transpose
     gbeam2_interfaces::msg::GraphAdjacency transposed_adj;
@@ -725,7 +725,7 @@ gbeam2_interfaces::msg::GraphAdjacency GraphAdj2GraphAdjTranspose(const gbeam2_i
     transposed_adj.col = adj.row;
     
     // Resize data vector
-    transposed_adj.data.resize(adj.data.size(), 0.0f);
+    transposed_adj.data.resize(adj.data.size(), -1.0f);
 
     // Perform transpose
     for (int i = 0; i < adj.row; ++i) {
@@ -738,6 +738,45 @@ gbeam2_interfaces::msg::GraphAdjacency GraphAdj2GraphAdjTranspose(const gbeam2_i
 
     return transposed_adj;
 }
+
+gbeam2_interfaces::msg::GraphAdjacency UpdateAndTransposeAdj(const gbeam2_interfaces::msg::GraphAdjacency& adj, const int old_rows)
+{
+    /*// Validate input
+    if (adj.data.empty()) {
+        gbeam2_interfaces::msg::GraphAdjacency empty_adj;
+        empty_adj.row = 0;
+        empty_adj.col = 0;
+        return empty_adj;
+    }*/
+
+    // Create new GraphAdjacency message for transpose
+    gbeam2_interfaces::msg::GraphAdjacency transposed_adj;
+    
+    //
+    int curr_row = (old_rows==0) ? 1: old_rows;
+    int curr_col = (adj.row==0) ? 1: adj.row;
+
+
+    // Swap dimensions for transpose
+    transposed_adj.row = curr_row;
+    transposed_adj.col = curr_col;
+    
+    // Resize data vector
+    transposed_adj.data.resize(adj.row*old_rows, -1.0f);
+
+    // Perform transpose
+    for (int i = 0; i < curr_col; ++i) {
+        for (int j = 0; j < curr_row; ++j) {
+            // Original: data[i * col + j]
+            // Transposed: data[j * row + i]
+            transposed_adj.data[j * curr_col + i] = adj.data[i * curr_row + j];
+        }
+    }
+
+    return transposed_adj;
+}
+
+
 
 
 gbeam2_interfaces::msg::GraphAdjacency matrixTranspose2GraphAdj(const std::vector<std::vector<float>>& matrix)
@@ -765,7 +804,7 @@ gbeam2_interfaces::msg::GraphAdjacency matrixTranspose2GraphAdj(const std::vecto
 
     adj.col = col;  // Number of columns is now the original matrix's rows
     adj.row = row;  // Number of rows is now the original matrix's columns
-    adj.data.resize(row * col, 0.0f);  // Resize and initialize with zeros
+    adj.data.resize(row * col, -1.0f);  // Resize and initialize with zeros
 
     // Perform actual matrix transpose
     for (size_t i = 0; i < row; ++i) {
@@ -808,38 +847,49 @@ void addNode(gbeam2_interfaces::msg::Graph& graph, const gbeam2_interfaces::msg:
     // Add vertex to the graph
     graph.nodes.push_back(vert);
 
-    // Update adjacency matrix
-    int col = graph.adj_matrix[graph.robot_id].col;
-    int row = graph.adj_matrix[graph.robot_id].row;
-    graph.adj_matrix[graph.robot_id].col = col + 1;
-    graph.adj_matrix[graph.robot_id].row = row + 1;
-    
-    std::vector<float> new_data((col + 1) * (row + 1), -1.0f);
-    //std::vector<float> empty_row(row + 1, -1.0f);
+    // Update for each robot's adjacency matrix
+    for (int z = 0; z < N_robot; ++z) {
+        // Current matrix dimensions
+        int current_row = graph.adj_matrix[z].row;
+        int current_col = graph.adj_matrix[z].col;
 
-    // Copy old data to new adjacency matrix
-    for(int z = 0 ; z<N_robot ; z++){
-      if(z==graph.robot_id){
-        for (int i = 0; i < row+1; ++i) { // Its own SQUARE MATRIX
-          for (int j = 0; j < col+1; ++j) {
-              new_data[i * (col + 1) + j] = (i>row || j>col) ? graph.adj_matrix[graph.robot_id].data[i * col + j]:-1.0;
-          }
+        // Resize the row for all matrices
+        graph.adj_matrix[z].row = current_row + 1;
+
+        // If it's the current robot's matrix, create a special column
+        if (z == graph.robot_id) {
+            // Create a new data vector with increased size
+            std::vector<float> new_data((current_row + 1) * (current_col + 1), -1.0f);
+
+            // Copy existing data
+            for (int i = 0; i < current_row; ++i) {
+                for (int j = 0; j < current_col; ++j) {
+                    new_data[i * (current_col + 1) + j] = graph.adj_matrix[z].data[i * current_col + j];
+                }
+            }
+
+            // Update matrix
+            graph.adj_matrix[z].col = current_col + 1;
+            graph.adj_matrix[z].data = new_data;
+        } else {
+            // For other robots, just add a column of -1
+            if(current_col==0){
+              graph.adj_matrix[z].col = current_col + 1;
+              current_col=1;
+            }
+            std::vector<float> new_data((current_row + 1) * (current_col), -1.0f);
+
+            // Copy existing data
+            for (int i = 0; i < current_row; ++i) {
+                for (int j = 0; j < current_col; ++j) {
+                    new_data[i * (current_col) + j] = graph.adj_matrix[z].data[i * current_col + j];
+                }
+            }
+
+            graph.adj_matrix[z].data = new_data;
         }
-      } else{
-        int ext_row = graph.adj_matrix[z].row;
-        int ext_col = graph.adj_matrix[z].col;
-        std::vector<float> new_ext_data((ext_col) * (ext_row + 1), -1.0f);
-        graph.adj_matrix[z].row = ext_row+1;
-        for(int j=0; j<graph.adj_matrix[z].col; j++){
-           new_ext_data[(ext_row +1)* (ext_col + 1) + j] = -1.0; //(j>col) ? graph.adj_matrix[graph.robot_id].data[i * col + j]:
-        }
-        //graph.adj_matrix[z].data.push_back(empty_row);
-      }
     }
-    // Replace old data with new data
-    graph.adj_matrix[graph.robot_id].data = new_data;
 }
-
 //*********************************************************************
 //********************* EXPLORATION FUNCTIONS *******************************
 //*********************************************************************

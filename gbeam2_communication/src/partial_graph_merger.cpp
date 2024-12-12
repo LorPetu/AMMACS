@@ -91,7 +91,7 @@ public:
     RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF PARTIAL_GRAPH_MERGER: ############# ");
     RCLCPP_INFO(this->get_logger(),"############# (for %s) ############# ",name_space.c_str());
     RCLCPP_INFO(this->get_logger(),"1) Number of robots: %d",N_robot);
-    RCLCPP_INFO(this->get_logger(),"1) Number of robots: %f",wifi_range);
+    RCLCPP_INFO(this->get_logger(),"2) Wifi range: %f",wifi_range);
     // Initialize vectors with the correct size
     curr_updateBuffer.resize(N_robot);
     prev_updateBuffer.resize(N_robot);
@@ -104,8 +104,14 @@ public:
     for (int i = 0; i < N_robot; ++i) {
         curr_updateBuffer[i] = std::make_shared<gbeam2_interfaces::msg::Graph>();
         curr_updateBuffer[i]->robot_id = name_space_id;
+        curr_updateBuffer[i]->adj_matrix.resize(N_robot);
         prev_updateBuffer[i] = std::make_shared<gbeam2_interfaces::msg::Graph>();
         prev_updateBuffer[i]->robot_id = name_space_id;
+        prev_updateBuffer[i]->adj_matrix.resize(N_robot);
+        for(int z =0; z<N_robot;z++){
+            curr_updateBuffer[i]->adj_matrix[z].data.reserve(1);
+            prev_updateBuffer[i]->adj_matrix[z].data.reserve(1);            
+        }
     }
    
 
@@ -223,7 +229,7 @@ private:
             if(name_space_id==req_robot_id) return;
             std::unique_lock<std::mutex> lock(mutex_);
             RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Service call received from %d", name_space_id, req_robot_id);
-            //RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
+            RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
 
             std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character
             std::string source_frame = "robot"+ std::to_string(req_robot_id) + "/odom";
@@ -235,7 +241,7 @@ private:
             fake_poly.robot_id = req_robot_id;
             fake_poly.header.frame_id = target_frame;
 
-            //RCLCPP_INFO(this->get_logger(), "-->I'm sending %ld nodes from: %d", fake_poly.polygon.vertices_reachable.size(), fake_poly.robot_id);
+            RCLCPP_INFO(this->get_logger(), "-->I'm sending %ld nodes from: %d", fake_poly.polygon.vertices_reachable.size(), fake_poly.robot_id);
             
             // Reset flags and prepare for new update
             data_received_ = false;
@@ -244,6 +250,9 @@ private:
             // Publish the fake polygon
             external_updates.polygon= fake_poly;
             external_updates.adj_matrix = request->update_request.adj_matrix;
+            external_updates.robot_id = req_robot_id;
+            RCLCPP_INFO(this->get_logger(),"Sending UPDATES to GraphUpdateNode from robot%d with matrix C_%d%d:: rows: %d columns:%d",req_robot_id,req_robot_id,name_space_id,external_updates.adj_matrix[name_space_id].row,external_updates.adj_matrix[name_space_id].col);
+            RCLCPP_INFO(this->get_logger(),"Sending UPDATES to GraphUpdateNode from robot%d with matrix C_%d%d:: rows: %d columns:%d",req_robot_id,req_robot_id,req_robot_id,external_updates.adj_matrix[req_robot_id].row,external_updates.adj_matrix[req_robot_id].col);
             fake_poly_pub_->publish(external_updates);
 
             // Wait for the update to be processed with a timeout
@@ -322,7 +331,8 @@ private:
 
                     std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Request> request_ = std::make_shared<gbeam2_interfaces::srv::GraphUpdate::Request>();
 
-                    request_->update_request = *curr_updateBuffer[i];                    
+                    request_->update_request = *curr_updateBuffer[i];  
+                    RCLCPP_INFO(this->get_logger(),"Sending REQUEST UPDATES to robot%d with matrix C_%d%d:: rows: %d columns:%d",i,name_space_id,i,curr_updateBuffer[i]->adj_matrix[i].row,curr_updateBuffer[i]->adj_matrix[i].col);                  
                     prev_updateBuffer[i]=curr_updateBuffer[i];
 
                     /*while (!graph_updates_CLIENTS[i]->wait_for_service(1s)) {
@@ -410,6 +420,10 @@ private:
         );
 
         result.adj_matrix = current_graph->adj_matrix;
+        for(int z=0; z<current_graph->adj_matrix.size();z++){
+            RCLCPP_INFO(this->get_logger(),"compareUpdates:: C_%d%d :: rows: %d columns: %d",current_graph->robot_id, z,current_graph->adj_matrix[z].row,current_graph->adj_matrix[z].col);
+        }
+        
         result.robot_id = current_graph->robot_id;
 
 

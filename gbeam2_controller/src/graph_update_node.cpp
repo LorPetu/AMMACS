@@ -164,9 +164,19 @@ private:
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::ExtGraphUpdate> update){
         // Each time i receive external nodes I store them 
         external_nodes = update->polygon; 
-        for(int z=0; z>graph.adj_matrix.size();z++){
-            if(z!=name_space_id) GraphAdj2GraphAdjTranspose(update->adj_matrix[z]);
-        }
+        RCLCPP_INFO(this->get_logger(),"Received external nodes from robot%d, size of adj matrices %d",update->robot_id,graph.adj_matrix.size());
+        RCLCPP_INFO(this->get_logger(),"From robot%d received matrix C_%d%d with %d rows and %d columns",update->robot_id,update->robot_id,name_space_id,update->adj_matrix[name_space_id].row,update->adj_matrix[name_space_id].col);
+        RCLCPP_INFO(this->get_logger(),"CURRENT Transposed matrix C_%d%d %d rows and %d columns",name_space_id,update->robot_id, graph.adj_matrix[update->robot_id].row,graph.adj_matrix[update->robot_id].col);
+        if(update->adj_matrix[name_space_id].row !=0 && update->adj_matrix[name_space_id].col !=0) graph.adj_matrix[update->robot_id] = UpdateAndTransposeAdj(update->adj_matrix[name_space_id],graph.adj_matrix[update->robot_id].row);
+        RCLCPP_INFO(this->get_logger(),"NEW Transposed matrix C_%d%d %d rows and %d columns",name_space_id,update->robot_id, graph.adj_matrix[update->robot_id].row,graph.adj_matrix[update->robot_id].col);
+
+        // for(int z=0; z<graph.adj_matrix.size();z++){
+        //     if(z!=name_space_id){
+        //         RCLCPP_INFO(this->get_logger(),"%d :: From robot %d received matrix with %d rows and %d columns",z,update->robot_id,update->adj_matrix[z].row,update->adj_matrix[z].col);
+        //         graph.adj_matrix[z] = GraphAdj2GraphAdjTranspose(update->adj_matrix[z]);
+        //         RCLCPP_INFO(this->get_logger(),"Transposed matrix %d rows and %d columns",graph.adj_matrix[z].row,graph.adj_matrix[z].col);
+        //     }
+        // }
 
         received_ext_nodes = true;
     }
@@ -292,6 +302,7 @@ private:
         }
 
         auto new_adj_matrix = GraphAdj2matrix(graph.adj_matrix[name_space_id]);
+        auto ext_adj_matrix = GraphAdj2matrix(graph.adj_matrix[external_nodes.robot_id]);
 
         // ####################################################
         // ####### ---------- ADD GRAPH EDGES --------- #######

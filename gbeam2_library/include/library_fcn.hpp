@@ -171,6 +171,8 @@ gbeam2_interfaces::msg::GraphEdge computeEdge(gbeam2_interfaces::msg::Vertex ver
 // NEW FUNCTIONS
 gbeam2_interfaces::msg::GraphAdjacency matrix2GraphAdj(const std::vector<std::vector<float>>& matrix);
 
+gbeam2_interfaces::msg::GraphAdjacency UpdateAndTransposeAdj(const gbeam2_interfaces::msg::GraphAdjacency& adj, const int old_rows);
+
 std::vector<std::vector<float>> GraphAdj2matrix(const gbeam2_interfaces::msg::GraphAdjacency& adj);
 
 gbeam2_interfaces::msg::GraphAdjacency matrixTranspose2GraphAdj(const std::vector<std::vector<float>>& matrix);
