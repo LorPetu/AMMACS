@@ -38,6 +38,7 @@ public:
     GraphDrawer() : Node("graph_draw")
     {
         name_space = this->get_namespace();
+        name_space_id = name_space.back()- '0';
         graph_nodes_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("gbeam_visualization/graph_nodes", 1);
         graph_normals_pub = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/graph_nodes_normals", 1);
         graph_edges_pub = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/graph_edges", 1);
@@ -54,16 +55,21 @@ public:
             std::bind(&GraphDrawer::ClusterCallback, this, std::placeholders::_1));
 
         this->declare_parameter<float>("scaling", 0.0);
+        this->declare_parameter<int>("N_robot",0);
 
         scaling = this->get_parameter("scaling").get_parameter_value().get<float>();
+        N_robot = this->get_parameter("N_robot").get_parameter_value().get<int>();
 
         RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF GRAPH_DRAW: ############# ");
         RCLCPP_INFO(this->get_logger(),"1) SCALING: %f", scaling);
+        RCLCPP_INFO(this->get_logger(),"2) Number of robots: %d",N_robot);
 
     }
 
 private:
     std::string name_space;
+    int name_space_id;
+    int N_robot;
 
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr graph_nodes_pub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr graph_normals_pub;
@@ -304,25 +310,34 @@ private:
     }
 
 
-    void ClusterCallback(const gbeam2_interfaces::msg::GraphCluster::SharedPtr cluster_graph_ptr){
-
+    void ClusterCallback(const gbeam2_interfaces::msg::GraphCluster::SharedPtr cluster_graph_ptr) {
         double gain_scale = 0.005;
         double cluster_height = 5.0;
-        std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character
+        std::string target_frame = name_space.substr(1, name_space.length() - 1) + "/odom"; // becasue lookupTransform doesn't allow "/" as first character
+
         visualization_msgs::msg::MarkerArray centroid_points;
+        visualization_msgs::msg::MarkerArray text_markers; // Marker array for text markers
         visualization_msgs::msg::Marker edges_markers;
         edges_markers.type = visualization_msgs::msg::Marker::LINE_LIST;
-        edges_markers.id=2; edges_markers.header.frame_id =target_frame;
-        edges_markers.ns="clusters_e";
+        edges_markers.id = 2;
+        edges_markers.header.frame_id = target_frame;
+        edges_markers.ns = "clusters_e";
         edges_markers.scale.x = 0.05 * scaling;
 
         std_msgs::msg::ColorRGBA walkable_color;
         walkable_color.r = 1, walkable_color.g = 0.1, walkable_color.b = 0.8, walkable_color.a = 0.15;
 
-        
+        std_msgs::msg::ColorRGBA robot_color;
+
+        // Assign a rainbow color to each marker
+        float hue = 360.0f * (static_cast<float>(name_space_id) / static_cast<float>(N_robot)); // Normalize hue [0, 360]
+        float r, g, b;
+        HSVtoRGB(hue, 1.0f, 1.0f, r, g, b); // Convert HSV to RGB (1.0f for full saturation and value)
+        robot_color.r = r; robot_color.g = g; robot_color.b = b; robot_color.a = 1.0;
+
         // Draw each centroid of the cluster
         for (auto& cluster : cluster_graph_ptr->clusters) {
-            // Nodes belonging to that cluster
+            // CYLINDER marker for the cluster centroid
             visualization_msgs::msg::Marker marker;
 
             marker.header.frame_id = target_frame;
@@ -335,53 +350,65 @@ private:
             marker.pose.position.x = cluster.centroid.x;
             marker.pose.position.y = cluster.centroid.y;
             marker.pose.position.z = cluster_height;
-            //scale.x is diameter in x direction, 
-            //scale.y in y direction, by setting these to different values you get an ellipse instead of a circle. 
-            //Use scale.z to specify the height.
-            marker.scale.x = 0.3;
-            marker.scale.y = 0.3;
-            marker.scale.z = cluster.total_gain*gain_scale;
+            marker.scale.x = cluster.nodes.size()/2*0.03;
+            marker.scale.y = cluster.nodes.size()/2*0.03;
+            marker.scale.z = cluster.total_gain * gain_scale;
 
-            // Assign a rainbow color to each marker
-            float hue = 360.0f * (static_cast<float>(cluster.cluster_id) / static_cast<float>(cluster_graph_ptr->clusters.size())); // Normalize hue [0, 360]
-            float r, g, b;
-            HSVtoRGB(hue, 1.0f, 1.0f, r, g, b); // Convert HSV to RGB (1.0f for full saturation and value)
+            marker.color = robot_color;
 
-            marker.color.r = r;
-            marker.color.g = g;
-            marker.color.b = b;
+            
 
-            marker.color.a=1.0;
+            // TEXT marker for the cluster ID
+            visualization_msgs::msg::Marker text_marker;
 
+            text_marker.header.frame_id = target_frame;
+            text_marker.ns = "cluster_id";
+            text_marker.id = cluster.cluster_id + 1000; // Ensure unique IDs for text markers
+            text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+
+            text_marker.action = visualization_msgs::msg::Marker::ADD;
+
+            text_marker.pose.position.x = cluster.centroid.x;
+            text_marker.pose.position.y = cluster.centroid.y;
+            text_marker.pose.position.z = cluster_height + (cluster.total_gain * gain_scale) + 0.5; 
+
+            text_marker.scale.z = 0.5; // Font size
+            text_marker.color.r = 1.0; // White text
+            text_marker.color.g = 1.0;
+            text_marker.color.b = 1.0;
+            text_marker.color.a = 1.0;
+
+            text_marker.text = std::to_string(cluster.cluster_id); // Cluster ID as text
+
+            text_markers.markers.push_back(text_marker);
             centroid_points.markers.push_back(marker);
         }
-        
-        auto adj_matrix=GraphAdj2matrix(cluster_graph_ptr->adj_matr);
-        
-        for (int i = 0; i < adj_matrix.size(); i++)
-        {
-            for (int j = i+1; j < adj_matrix.size(); j++)
-            {
-               if(adj_matrix[i][j]!=0.0){
-                gbeam2_interfaces::msg::Vertex centr_i = cluster_graph_ptr->clusters[i].centroid;
-                centr_i.z = cluster_height;
-                gbeam2_interfaces::msg::Vertex centr_j = cluster_graph_ptr->clusters[j].centroid;
-                centr_j.z = cluster_height;
-                edges_markers.points.push_back(vertex2point(centr_i));
-                edges_markers.points.push_back(vertex2point(centr_j));
 
-                edges_markers.colors.push_back(walkable_color);
-                edges_markers.colors.push_back(walkable_color);
+        // Process adjacency matrix and edges
+        auto adj_matrix = GraphAdj2matrix(cluster_graph_ptr->adj_matr);
 
-               }
+        for (int i = 0; i < adj_matrix.size(); i++) {
+            for (int j = i + 1; j < adj_matrix.size(); j++) {
+                if (adj_matrix[i][j] != 0.0) {
+                    gbeam2_interfaces::msg::Vertex centr_i = cluster_graph_ptr->clusters[i].centroid;
+                    centr_i.z = cluster_height;
+                    gbeam2_interfaces::msg::Vertex centr_j = cluster_graph_ptr->clusters[j].centroid;
+                    centr_j.z = cluster_height;
+                    edges_markers.points.push_back(vertex2point(centr_i));
+                    edges_markers.points.push_back(vertex2point(centr_j));
+
+                    edges_markers.colors.push_back(walkable_color);
+                    edges_markers.colors.push_back(walkable_color);
+                }
             }
-            
-        }        
+        }
 
+        // Publish markers
         cluster_nodes_pub_->publish(centroid_points);
+        cluster_nodes_pub_->publish(text_markers); // Publish text markers
         cluster_edges_pub_->publish(edges_markers);
-
     }
+
 };
 
 int main(int argc, char **argv)

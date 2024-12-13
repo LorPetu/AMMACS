@@ -422,10 +422,15 @@ private:
         //std::vector<gbeam2_interfaces::msg::GraphClusterNode, std::allocator<gbeam2_interfaces::msg::GraphClusterNode>>::iterator it
         double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
         double tot_gain=0.0;
+        it->unexplored_nodes.clear();
         for(auto& node_id:it->nodes){
             sum_x += graph.nodes[node_id].x;
             sum_y += graph.nodes[node_id].y;
             sum_z += graph.nodes[node_id].z;
+
+            if(graph.nodes[node_id].gain>0){
+                it->unexplored_nodes.push_back(node_id);
+            }
 
             tot_gain+=graph.nodes[node_id].gain;
         }
@@ -852,7 +857,24 @@ private:
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1>0.7) cluster_state=2;
             } else{
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=2;
-            }    
+            } 
+
+            int N_clusters = cluster_adj_matrix.size();
+            cluster_adj_matrix.assign(N_clusters, std::vector<float>(N_clusters, 0.0f)); 
+
+            for (auto& cl_i : Graphclusters.clusters) {
+                for (auto& node_id : cl_i.nodes) {
+                    gbeam2_interfaces::msg::Vertex cl_node=graph.nodes[node_id];
+                    for (int neigh_id:graph.nodes[node_id].neighbors) {
+                        // Determine the cluster ID of the neighbor node
+                        int neigh_cluster_id = graph.nodes[neigh_id].cluster_id;  
+                        if (neigh_cluster_id != -1) {
+                           cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                        }
+                        
+                    }
+                }
+            }  
 
         }
            
@@ -860,6 +882,10 @@ private:
         RCLCPP_INFO(this->get_logger(), "Case: %d ||gamma_1: %f Average degree: %f",cluster_state,gamma_1,avg_degree);
 
         // Evaluate delta between density and switch logic
+
+        // Update Global Clustering connection in the adjacency matrix
+
+        
 
         // LOCAL CLUSTERING with just added node and edges
 
@@ -871,8 +897,6 @@ private:
             computeClusterProperties(new_cluster);
             Graphclusters.clusters.push_back(new_cluster);
             RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
-
-            clusters_pub_->publish(Graphclusters);
 
             //RESET
             tot_density_curr = 0.0;
@@ -1010,8 +1034,8 @@ private:
                
             }
 
-            // Inizialization: Readapte cluster mapping to describe global commmunities 
-            //unclustered_nodes.clear();
+            // Inizialization: Readapt cluster mapping to describe global commmunities 
+            // unclustered_nodes.clear();
 
             // Inizialization: Populate the GraphCluster weight matrix 
             // We want to identify all the edges INSIDE the cluster to make them self loop on a global level 
@@ -1048,7 +1072,7 @@ private:
                 ClusterNode_coeff[cl_i.cluster_id] = -1.0;
             }
 
-            printMatrix(this->get_logger(),cluster_adj_matrix);
+            //printMatrix(this->get_logger(),cluster_adj_matrix);
 
             mod_gain_increase=true;
             max_iterations=0;
@@ -1172,7 +1196,6 @@ private:
             RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
 
             
-            clusters_pub_->publish(Graphclusters);
 
             tot_density_curr = 0.0;
             avg_degree=0.0;
@@ -1189,55 +1212,60 @@ private:
         }
         // Remove empty clusters and reassign enumeration
         // Reassign also cluster_id for each vertex
-        int new_id = 0;
-        std::vector<int> old_to_new_id(Graphclusters.clusters.size(), -1); // Map old cluster IDs to new IDs
-
-        for (auto it = Graphclusters.clusters.begin(); it != Graphclusters.clusters.end();) {
-            if (!it->nodes.empty()) {
-                computeClusterProperties(it); // Recompute centroid and other properties
-                it->cluster_id = new_id;
-                it->is_unmergeable = (it->nodes.size() > 2);
-
-                // Update graph node references
-                for (auto& node_id : it->nodes) {
-                    graph.nodes[node_id].cluster_id = new_id;
-                }
-
-                old_to_new_id[it - Graphclusters.clusters.begin()] = new_id; // Map old ID to new ID
-                ++new_id;
-                ++it;
-            } else {
-                RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
-                it = Graphclusters.clusters.erase(it); // Safely remove empty clusters
-            }
-        }
-
-        // Resize the cluster adjacency matrix
-        size_t new_size = new_id; // Total number of clusters after cleanup
-        std::vector<std::vector<float>> updated_adj_matrix(new_size, std::vector<float>(new_size, 0.0));
-
-        // Rebuild the adjacency matrix using the updated cluster IDs
-        for (int i = 0; i < cluster_adj_matrix.size(); ++i) {
-            for (int j = i; j < cluster_adj_matrix[i].size(); ++j) {
-                if (old_to_new_id[i] != -1 && old_to_new_id[j] != -1) {
-                    int new_i = old_to_new_id[i];
-                    int new_j = old_to_new_id[j];
-                    updated_adj_matrix[new_i][new_j] = cluster_adj_matrix[i][j];
-                    updated_adj_matrix[new_j][new_i] = cluster_adj_matrix[i][j];
-                }
-            }
-        }
-
-        //printMatrix(this->get_logger(),updated_adj_matrix);
-
-        Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
-
-
-
         // publish graph if some change has occurred
-        if(is_changed)
-            graph_pub_->publish(graph);
+        if(is_changed){
+            int new_id = 0;
+            std::vector<int> old_to_new_id(Graphclusters.clusters.size(), -1); // Map old cluster IDs to new IDs
+
+            for (auto it = Graphclusters.clusters.begin(); it != Graphclusters.clusters.end();) {
+                if (!it->nodes.empty()) {
+                    computeClusterProperties(it); // Recompute centroid and other properties
+                    it->cluster_id = new_id;
+                    it->is_unmergeable = (it->nodes.size() > 2);
+
+                    // Update graph node references
+                    for (auto& node_id : it->nodes) {
+                        graph.nodes[node_id].cluster_id = new_id;
+                    }
+
+                    old_to_new_id[it - Graphclusters.clusters.begin()] = new_id; // Map old ID to new ID
+                    ++new_id;
+                    ++it;
+                } else {
+                    RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
+                    it = Graphclusters.clusters.erase(it); // Safely remove empty clusters
+                }
+            }
+
+            // Resize the cluster adjacency matrix
+            int new_size = new_id; // Total number of clusters after cleanup
+            std::vector<std::vector<float>> updated_adj_matrix(new_size, std::vector<float>(new_size, 0.0));
+
+            // Rebuild the adjacency matrix using the updated cluster IDs
+            for (int i = 0; i < cluster_adj_matrix.size(); ++i) {
+                for (int j = i; j < cluster_adj_matrix[i].size(); ++j) {
+                    if (old_to_new_id[i] != -1 && old_to_new_id[j] != -1) {
+                        int new_i = old_to_new_id[i];
+                        int new_j = old_to_new_id[j];
+                        updated_adj_matrix[new_i][new_j] = cluster_adj_matrix[i][j];
+                        updated_adj_matrix[new_j][new_i] = cluster_adj_matrix[i][j];
+                    }
+                }
+            }
+
             
+
+            Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
+
+        
+
+
+
+        
+            //printMatrix(this->get_logger(),updated_adj_matrix); //
+            graph_pub_->publish(graph);
+            clusters_pub_->publish(Graphclusters);
+        }    
         if(is_changed && received_ext_nodes)   received_ext_nodes = false;
     
         //end of polyCallback
