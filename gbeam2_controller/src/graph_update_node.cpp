@@ -81,9 +81,6 @@ public:
         external_poly_sub_ = this->create_subscription<gbeam2_interfaces::msg::FreePolygonStamped>(
             "external_nodes", 1, std::bind(&GraphUpdateNode::extNodesCallback, this, std::placeholders::_1));
 
-        point_cloud_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-        "merged_obstacles",1);
-
         
         // SERVICE
         status_server_ = this->create_service<gbeam2_interfaces::srv::SetMappingStatus>(
@@ -193,7 +190,7 @@ private:
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr poly_sub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr external_poly_sub_;
     rclcpp::Service<gbeam2_interfaces::srv::SetMappingStatus>::SharedPtr status_server_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_publisher_;
+    
 
     void logDoubleVector(rclcpp::Logger logger, const std::vector<double>& vec, const std::string& vec_name = "vector") {
         std::ostringstream oss;
@@ -607,17 +604,20 @@ private:
             if ((vert_dist > node_dist_min && vert_ext_dist> node_dist_min) && vert.is_obstacle)
             {
                 
-            vert.id = graph.nodes.size();
-            vert.gain ++;
-            if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
-            {
-                vert.is_reachable = false;
-                vert.gain = 0;
-            }
+                vert.id = graph.nodes.size();
+                vert.gain ++;
+                vert.cluster_id = -2;
+                if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
+                {
+                    vert.is_reachable = false;
+                    vert.gain = 0;
+                }
 
-            addNode(graph,vert);         //add vertex to the graph
-            if(vert.is_reachable) new_reach_node.push_back(vert);
-            is_changed = true;
+                addNode(graph,vert);         //add vertex to the graph
+                if(vert.is_reachable){
+                    RCLCPP_INFO(this->get_logger(),"!?!?!?!?!?!!?!? OBSTACLE Vertex %d is reachable !?!?!?!?",i);                    
+                    new_reach_node.push_back(vert);}
+                is_changed = true;
             }
             else if (vert_ext_dist< node_dist_open)
             {
@@ -1127,75 +1127,9 @@ private:
                 max_iterations++;
                 RCLCPP_INFO(this->get_logger(), "Iteration %d completed.", max_iterations);
                 
-            }
-
-            
-      
-
-            // DEBUG CLOUDPOINT 
-            // Prepare the PointCloud2 message
-            sensor_msgs::msg::PointCloud2 cloud_msg;
-            cloud_msg.header.stamp = this->now();  // Set timestamp
-            cloud_msg.header.frame_id = "world";     // Set frame ID (adjust if necessary)
-
-            // Reserve space for the points and the additional "side" field
-            cloud_msg.height = 1;                  // Unordered point cloud (1D array)
-            cloud_msg.is_dense = false;            // Allow for possible invalid points
-            int total_points = 0;
-            for(auto& cluster:Graphclusters.clusters){
-                total_points+= cluster.nodes.size();
-            }
-            cloud_msg.width = total_points;        // Number of points
-
-            // Define the PointCloud2 fields
-            sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
-            modifier.setPointCloud2Fields(4,  // Number of fields: x, y, z, and side
-                "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-                "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-                "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-                "comp", 1, sensor_msgs::msg::PointField::FLOAT32); 
-
-            modifier.resize(total_points);  // Resize the point cloud to accommodate all points
-
-            // Use iterators for better handling of PointCloud2
-            sensor_msgs::PointCloud2Iterator<float> iter_x(cloud_msg, "x");
-            sensor_msgs::PointCloud2Iterator<float> iter_y(cloud_msg, "y");
-            sensor_msgs::PointCloud2Iterator<float> iter_z(cloud_msg, "z");
-            sensor_msgs::PointCloud2Iterator<float> iter_comp(cloud_msg, "comp");
-
-            // Fill the data in row-major order (first all values of reach_node_label, then all values of field_vector)
-            int i=0;
-            for (auto cluster : Graphclusters.clusters) {
-                for(int id:cluster.nodes){
-                if (id < 0 || id >= graph.nodes.size()) {
-                    RCLCPP_ERROR(this->get_logger(), "Invalid node ID: %d. Skipping.", id);
-                    continue;
-                }
-                auto node = graph.nodes[id];
-                *iter_x = node.x;
-                *iter_y = node.y;
-                *iter_z = node.z;
-                *iter_comp = cluster.cluster_id; 
-                
-                ++iter_x;
-                ++iter_y;
-                ++iter_z;
-                ++iter_comp;
-
-                i++;
-                }
-                
-            }
-            // Process obstacles and reachables
-
-            // Publish the point cloud
-            point_cloud_publisher_->publish(cloud_msg);
-
-            
+            }            
 
             RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
-
-            
 
             tot_density_curr = 0.0;
             avg_degree=0.0;
