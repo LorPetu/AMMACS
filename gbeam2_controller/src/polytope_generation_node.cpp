@@ -194,14 +194,14 @@ private:
 
         for(int v=0; v<num_vertices; v++)
           {
-            float vert_angle = v*angle_diff_vert + angle_diff_vert/2 + offset_angle;
+            float vert_angle = v*angle_diff_vert + angle_diff_vert/2; // + offset_angle;
             vert_directions[v].x = cos(vert_angle);
             vert_directions[v].y = sin(vert_angle);
             vert_directions[v].z = 0;
           }
         
-        offset_angle+=10;
-        if(offset_angle==360) offset_angle=0;
+        //offset_angle+=10;
+        //if(offset_angle==360) offset_angle=0;
       //-------------------------------------------------------------------------------------------------
 
 
@@ -222,7 +222,8 @@ private:
       inside_vertices.clear();
 
       geometry_msgs::msg::Point32 vert_pos; 
-      vert_pos.x = robot_odom_.pose.pose.position.x; vert_pos.y = robot_odom_.pose.pose.position.y; vert_pos.z = robot_odom_.pose.pose.position.z;
+      vert_pos.x = 0.0; vert_pos.y = 0.0; vert_pos.z = 0.0;
+      // vert_pos.x = robot_odom_.pose.pose.position.x; vert_pos.y = robot_odom_.pose.pose.position.y; vert_pos.z = robot_odom_.pose.pose.position.z;
 
       inside_vertices.push_back(vert_pos);
 
@@ -368,6 +369,30 @@ private:
         free_poly.polygon = createReachablePolygon(free_poly.polygon, safe_dist);
       //---------------------------------------------------------------------------------------------------
 
+      // Populate Inside Reachable
+      for(int v=0; v<inside_vertices.size(); v++)
+      {
+        gbeam2_interfaces::msg::Vertex vert_obs;   //vertex against obstacle
+        vert_obs.x = inside_vertices[v].x;
+        vert_obs.y = inside_vertices[v].y;
+        vert_obs.z = inside_vertices[v].z;
+        float exp_gain = 0;
+        vert_obs.gain = exp_gain;
+        vert_obs.is_visited = false;
+        vert_obs.is_reachable = false;
+
+        if (countClose(poly.polygon.points[v], obstacles, obstacle_d_thr)>2)
+        {
+          vert_obs.is_obstacle = true;
+          vert_obs.obstacle_normal = computeNormal(poly.polygon.points[v], obstacles, obstacle_d_thr);
+        }
+        else
+        {
+          vert_obs.is_obstacle = false;
+        }
+
+        free_poly.polygon.inside_reachable.push_back(vert_obs);
+        }
 
       // ------------------------ Publishing the generated polygon ----------------------------------------
       free_poly_publisher_->publish(free_poly);
