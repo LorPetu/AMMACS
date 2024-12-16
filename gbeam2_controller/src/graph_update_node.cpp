@@ -36,6 +36,7 @@
 
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "std_msgs/msg/float32_multi_array.hpp"
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp> // For easier point cloud population
@@ -81,6 +82,8 @@ public:
         external_poly_sub_ = this->create_subscription<gbeam2_interfaces::msg::FreePolygonStamped>(
             "external_nodes", 1, std::bind(&GraphUpdateNode::extNodesCallback, this, std::placeholders::_1));
 
+        batch_values_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("batch_values",1);
+        batch_values.data.resize(4);
         
         // SERVICE
         status_server_ = this->create_service<gbeam2_interfaces::srv::SetMappingStatus>(
@@ -190,6 +193,9 @@ private:
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr poly_sub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr external_poly_sub_;
     rclcpp::Service<gbeam2_interfaces::srv::SetMappingStatus>::SharedPtr status_server_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr batch_values_pub_;
+    std_msgs::msg::Float32MultiArray batch_values;
+    
     
 
     void logDoubleVector(rclcpp::Logger logger, const std::vector<double>& vec, const std::string& vec_name = "vector") {
@@ -579,7 +585,7 @@ private:
             }
             
         }
-        for (int i=0; i<poly_ptr->polygon.vertices_obstacles.size(); i++)
+        /*for (int i=0; i<poly_ptr->polygon.vertices_obstacles.size(); i++)
         {
             gbeam2_interfaces::msg::Vertex vert = poly_ptr->polygon.vertices_obstacles[i];  //get vertex from polytope
             vert.belong_to = name_space_id;
@@ -623,7 +629,7 @@ private:
             {
                 RCLCPP_INFO(this->get_logger(),"OBSTACLE Vertex %d wasn't added due to conflict with external nodes",i);
             }
-        }
+        }*/
 
         for (int i=0; i<poly_ptr->polygon.inside_reachable.size(); i++)
         {
@@ -920,6 +926,12 @@ private:
                 }
             }  
 
+            batch_values.data[0] = (avg_degree>min_avg_degree) ? min_avg_degree : avg_degree;
+            batch_values.data[1] = (V_1>N_vert_min) ? N_vert_min : V_1;
+            batch_values.data[2] = abs(tot_density_curr - gamma_1)/gamma_1;
+
+            batch_values_pub_->publish(batch_values);
+
         }
            
 
@@ -946,6 +958,11 @@ private:
             tot_density_curr = 0.0;
             m_local=0.0;
             avg_degree=0.0;
+            batch_values.data[0] = 0.0;
+            batch_values.data[1] = 0.0;
+            batch_values.data[2] = 0.0;
+
+            batch_values_pub_->publish(batch_values);
             
             update_batch.clear();
             cluster_state=0;
@@ -955,6 +972,7 @@ private:
             ClusterNode_coeff.clear();
             ClusterNode_to_comm.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
+            
 
         }else if(cluster_state==2){ // Evaluate clustering coefficient and create new cluster
             bool mod_gain_increase=true;
@@ -1177,6 +1195,13 @@ private:
 
             tot_density_curr = 0.0;
             avg_degree=0.0;
+
+            batch_values.data[0] = 0.0;
+            batch_values.data[1] = 0.0;
+            batch_values.data[2] = 0.0;
+
+            batch_values_pub_->publish(batch_values);
+
             update_batch.clear();
             cluster_state=0;
             louvain_Com.clusters.clear();

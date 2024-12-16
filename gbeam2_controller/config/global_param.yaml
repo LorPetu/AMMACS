@@ -23,7 +23,7 @@
 
 /**/graph_update:
   ros__parameters:
-    node_dist_min: 0.1
+    node_dist_min: 0.05
     node_dist_open: 0.3
     node_bound_dist: 0.2
     obstacle_margin: 0.05 #0.05
