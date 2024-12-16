@@ -10,6 +10,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 
+
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/point_cloud.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
@@ -106,6 +107,7 @@ private:
   float node_dist_open;
   nav_msgs::msg::Odometry robot_odom_;
   sensor_msgs::msg::PointCloud2 inside_points;
+  std::unordered_map<int,float> vertToDist;
   std::vector<geometry_msgs::msg::Point32> inside_vertices;
 
   std::string name_space;
@@ -231,6 +233,7 @@ private:
         int num_stopped = 0;
         bool reset=false;
         int iter = 0, max_iter = (scan->range_max - start_dist) / dist_step;
+        RCLCPP_INFO(this->get_logger(),"max_iter: %d",max_iter);
         int iter_dist =0, trigger_dist_step = node_dist_open / dist_step;
         while (num_stopped < num_vertices && iter++ < max_iter) {
             for (int v = 0; v < num_vertices; v++) {
@@ -245,67 +248,16 @@ private:
                         move_vertex[v] = false;
                         num_stopped++;
                     }
-                    if(move_vertex[v] && iter_dist==trigger_dist_step){
-                      // If the nodes is not stopped and we reached the trigger_dist_step*dist_step = open_bound_dist
-                      // we can add an inside node
-                      inside_vertices.push_back(poly.polygon.points[v]);
-                      reset=true;
-
-                    }
-                    
+                                        
                 }
 
 
             }
-
-          iter_dist++; 
-          if(reset){
-            iter_dist=0; reset=false;}
         }
         
       //------------------------------------------------------------------------------------------------
 
-      RCLCPP_INFO(this->get_logger(),"Adding %d inside nodes.",inside_vertices.size());
-
-      // DEBUG CLOUDPOINT 
-      // Prepare the PointCloud2 message
-      inside_points.header = scan->header;
-
-      // Reserve space for the points and the additional "side" field
-      inside_points.height = 1;                  // Unordered point cloud (1D array)
-      inside_points.is_dense = false;            // Allow for possible invalid points
-      int total_points = inside_vertices.size();
-      inside_points.width = total_points;        // Number of points
-
-      // Define the PointCloud2 fields
-      sensor_msgs::PointCloud2Modifier modifier(inside_points);
-      modifier.setPointCloud2Fields(3,  // Number of fields: x, y, z, and side
-          "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-          "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-          "z", 1, sensor_msgs::msg::PointField::FLOAT32); 
-
-      modifier.resize(total_points);  // Resize the point cloud to accommodate all points
-
-      // Use iterators for better handling of PointCloud2
-      sensor_msgs::PointCloud2Iterator<float> iter_x(inside_points, "x");
-      sensor_msgs::PointCloud2Iterator<float> iter_y(inside_points, "y");
-      sensor_msgs::PointCloud2Iterator<float> iter_z(inside_points, "z");
-          
-        for(auto& vert:inside_vertices){
-
-          *iter_x = vert.x;
-          *iter_y = vert.y;
-          *iter_z = vert.z;
-         
-          
-          ++iter_x;
-          ++iter_y;
-          ++iter_z;
-
-        }
-
-
-      test_publisher_->publish(inside_points);
+      
 
       //---------------------------- Initialize free poly ----------------------------------------------
           
@@ -336,7 +288,7 @@ private:
           exp_gain++;
           float step = abs(scan->ranges[o]-scan->ranges[o+1]);
           float tmp = step>scan->range_max ? 0 : step / obst_dist_min;
-          if( tmp>1){
+          if(tmp>1){
             //ROS_INFO("vertex: %d   ## tmp value: %f", v, tmp);
             //ROS_INFO("Vertex position: x:%f  y:%f",vert_obs.x,vert_obs.y);
             //ROS_INFO("range_max: %f", scan->range_max);
@@ -370,29 +322,70 @@ private:
       //---------------------------------------------------------------------------------------------------
 
       // Populate Inside Reachable
-      for(int v=0; v<inside_vertices.size(); v++)
+      gbeam2_interfaces::msg::Vertex zero_pos;
+      zero_pos.belong_to = name_space_id;
+      int j=0;
+      for(auto& vert_reach:free_poly.polygon.vertices_reachable)
       {
-        gbeam2_interfaces::msg::Vertex vert_obs;   //vertex against obstacle
-        vert_obs.x = inside_vertices[v].x;
-        vert_obs.y = inside_vertices[v].y;
-        vert_obs.z = inside_vertices[v].z;
-        float exp_gain = 0;
-        vert_obs.gain = exp_gain;
-        vert_obs.is_visited = false;
-        vert_obs.is_reachable = false;
+        int N = dist(vert_reach,zero_pos)/node_dist_open;
+        RCLCPP_INFO(this->get_logger(),"Adding %d inside nodes for vertex %d.",N,j);
+        gbeam2_interfaces::msg::Vertex vert_in;
+        for(int i=1; i<N+1; i++){
+            float fraction = static_cast<float>(i) / static_cast<float>(N);
+           
+            vert_in.x = fraction*vert_reach.x;
+            vert_in.y = fraction*vert_reach.y;
+            vert_in.z = vert_reach.x;
+            vert_in.gain = 0;
+            vert_in.is_visited = false;
+            vert_in.is_reachable = false;
+            vert_in.is_obstacle = false;
+            free_poly.polygon.inside_reachable.push_back(vert_in);
+        }
+        j++;
+        }
 
-        if (countClose(poly.polygon.points[v], obstacles, obstacle_d_thr)>2)
-        {
-          vert_obs.is_obstacle = true;
-          vert_obs.obstacle_normal = computeNormal(poly.polygon.points[v], obstacles, obstacle_d_thr);
-        }
-        else
-        {
-          vert_obs.is_obstacle = false;
+      RCLCPP_INFO(this->get_logger(),"Adding %d inside nodes.",free_poly.polygon.inside_reachable.size());
+
+      // DEBUG CLOUDPOINT 
+      // Prepare the PointCloud2 message
+      inside_points.header = scan->header;
+
+      // Reserve space for the points and the additional "side" field
+      inside_points.height = 1;                  // Unordered point cloud (1D array)
+      inside_points.is_dense = false;            // Allow for possible invalid points
+      int total_points = free_poly.polygon.inside_reachable.size();
+      inside_points.width = total_points;        // Number of points
+
+      // Define the PointCloud2 fields
+      sensor_msgs::PointCloud2Modifier modifier(inside_points);
+      modifier.setPointCloud2Fields(3,  // Number of fields: x, y, z, and side
+          "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "z", 1, sensor_msgs::msg::PointField::FLOAT32); 
+
+      modifier.resize(total_points);  // Resize the point cloud to accommodate all points
+
+      // Use iterators for better handling of PointCloud2
+      sensor_msgs::PointCloud2Iterator<float> iter_x(inside_points, "x");
+      sensor_msgs::PointCloud2Iterator<float> iter_y(inside_points, "y");
+      sensor_msgs::PointCloud2Iterator<float> iter_z(inside_points, "z");
+          
+        for(auto& vert:free_poly.polygon.inside_reachable){
+
+          *iter_x = vert.x;
+          *iter_y = vert.y;
+          *iter_z = vert.z;
+         
+          
+          ++iter_x;
+          ++iter_y;
+          ++iter_z;
+
         }
 
-        free_poly.polygon.inside_reachable.push_back(vert_obs);
-        }
+
+      test_publisher_->publish(inside_points);
 
       // ------------------------ Publishing the generated polygon ----------------------------------------
       free_poly_publisher_->publish(free_poly);
