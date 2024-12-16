@@ -625,6 +625,50 @@ private:
             }
         }
 
+        for (int i=0; i<poly_ptr->polygon.inside_reachable.size(); i++)
+        {
+            //RCLCPP_INFO(this->get_logger(),"entrato nel primo for -------> ");
+            gbeam2_interfaces::msg::Vertex vert = poly_ptr->polygon.inside_reachable[i];  //get vertex from polytope
+            vert.belong_to = name_space_id;
+            vert.cluster_id = -1;
+            vert = vert_transform(vert, l2g_tf); //change coordinates to global position
+
+            float vert_dist = vert_graph_distance_noobstacle(graph, vert);
+            // vert = applyBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys);
+
+            /// ####### NEW PART FOR COMMUNICATION ############
+            float vert_ext_dist; 
+            if(received_ext_nodes && external_nodes.polygon.inside_reachable.size()!=0){
+                gbeam2_interfaces::msg::Graph fake_graph;
+                fake_graph.nodes = external_nodes.polygon.inside_reachable;
+                vert_ext_dist = vert_graph_distance_noobstacle(fake_graph, vert);
+            }
+            else{
+                vert_ext_dist = INF;
+            }
+            // ################################################
+
+            if (vert_dist > node_dist_open && vert_ext_dist> node_dist_open) // modified also this condition
+            {
+            vert.id = graph.nodes.size();
+            vert.is_reachable = true;
+            vert.gain ++;
+            if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
+            {
+                vert.is_reachable = false;
+                vert.gain = 0;
+            }
+            addNode(graph,vert); //add vertex to the graph
+            if(vert.is_reachable) new_reach_node.push_back(vert);
+            is_changed = true;
+            }
+            else if (vert_ext_dist< node_dist_open)
+            {
+                RCLCPP_INFO(this->get_logger(),"REACHABLE Vertex %d wasn't added due to conflict with external nodes",i);
+            }
+            
+        }
+
         auto new_adj_matrix = GraphAdj2matrix(graph.adj_matrix);
 
         int N = new_adj_matrix.size();

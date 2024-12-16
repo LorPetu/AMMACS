@@ -4,6 +4,7 @@
 
 /**:
   ros__parameters:
+      node_dist_open: 0.3
       safe_dist: 0.2
       limit_xi: -2.5          #-1.0
       limit_xs:  2.5              #1.0
