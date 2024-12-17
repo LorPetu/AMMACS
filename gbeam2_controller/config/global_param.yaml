@@ -26,8 +26,8 @@
     node_dist_min: 0.05
     node_dist_open: 0.3
     node_bound_dist: 0.2
-    obstacle_margin: 0.05 #0.05
-    max_lenght_edge: 1.0 #At least 3x node_dist_open
+    obstacle_margin: 0.15 #0.05
+    max_lenght_edge: 0.6 #At least 3x node_dist_open
 
 
 /**/graph_expl:

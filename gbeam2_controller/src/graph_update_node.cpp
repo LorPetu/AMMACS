@@ -211,6 +211,19 @@ private:
         RCLCPP_INFO(logger, "%s", oss.str().c_str());
     }
 
+    void logIntVector(rclcpp::Logger logger, const std::vector<int>& vec, const std::string& vec_name = "vector") {
+        std::ostringstream oss;
+        oss << vec_name << ": [";
+        for (size_t i = 0; i < vec.size(); ++i) {
+            oss << vec[i];
+            if (i < vec.size() - 1) {
+                oss << ", ";
+            }
+        }
+        oss << "]";
+        RCLCPP_INFO(logger, "%s", oss.str().c_str());
+    }
+
 #include <iomanip>
 
     void printMatrix(rclcpp::Logger logger, const std::vector<std::vector<float>> &matrix, const std::string &matrix_name = "Matrix") {
@@ -676,6 +689,7 @@ private:
         }
 
         auto new_adj_matrix = GraphAdj2matrix(graph.adj_matrix);
+        //printMatrix(this->get_logger(),new_adj_matrix);
 
         int N = new_adj_matrix.size();
         double m = 0.0;
@@ -708,13 +722,14 @@ private:
         std::vector<int> inReachableId;
         std::vector<int> inObstacleNotReachableId;
         for (int i=0; i<graph.nodes.size(); i++)
-            if(isInsideObstacles(polyGlobal,graph.nodes[i])){
-                if (isInsideReachable(polyGlobal, graph.nodes[i])){
-                    inReachableId.push_back(i);
-                }else{
-                    if(graph.nodes[i].is_obstacle) inObstacleNotReachableId.push_back(i);
-                }
+            if(isInsideReachable(polyGlobal,graph.nodes[i])){
+                
+                inReachableId.push_back(i);
+                
             }
+
+        //RCLCPP_INFO(this->get_logger(),"Graphs node inside reachable: %d", inReachableId.size());
+        //logIntVector(this->get_logger(), inReachableId);
             
 
         
@@ -724,15 +739,18 @@ private:
             {
             if (new_adj_matrix[inReachableId[i]][inReachableId[j]] == -1) 
             {
+                
                 //then add edge i-j to graph
                 gbeam2_interfaces::msg::Vertex& node_i = graph.nodes[inReachableId[i]];
                 gbeam2_interfaces::msg::Vertex& node_j = graph.nodes[inReachableId[j]]; 
                 gbeam2_interfaces::msg::GraphEdge edge = computeEdge(node_i, node_j, node_bound_dist);
                 edge.id = graph.edges.size();
+              
                 if(!node_i.is_obstacle && !node_j.is_obstacle && edge.length < max_lenght_edge){
                     if(isInsideReachable(polyGlobal, node_i) && isInsideReachable(polyGlobal, node_j))
                     edge.is_walkable = true;  // if both vertices are inside reachable poly, then the edge is walkable
                     graph.edges.push_back(edge);
+                    
 
                     //update adjacency matrix
                     new_adj_matrix[inReachableId[i]][inReachableId[j]] = edge.id;
@@ -754,7 +772,7 @@ private:
             }
             }
         }
-
+        /*
         for (int i=0; i<inObstacleNotReachableId.size(); i++)
         {
            for (int j=i+1; j<inObstacleNotReachableId.size(); j++)
@@ -781,7 +799,7 @@ private:
 
                 }
             }
-        }
+        }*/
         
 
         graph.adj_matrix=matrix2GraphAdj(new_adj_matrix);
@@ -935,7 +953,7 @@ private:
         }
            
 
-        RCLCPP_INFO(this->get_logger(), "Case: %d ||gamma_1: %f Average degree: %f",cluster_state,gamma_1,avg_degree);
+        //RCLCPP_INFO(this->get_logger(), "Case: %d ||gamma_1: %f Average degree: %f",cluster_state,gamma_1,avg_degree);
 
         // Evaluate delta between density and switch logic
 
@@ -952,7 +970,7 @@ private:
             new_cluster.is_unmergeable=true;
             computeClusterProperties(new_cluster);
             Graphclusters.clusters.push_back(new_cluster);
-            RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
+            //RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
 
             //RESET
             tot_density_curr = 0.0;
@@ -1265,7 +1283,7 @@ private:
 
 
         
-            //printMatrix(this->get_logger(),updated_adj_matrix); //
+            ////printMatrix(this->get_logger(),updated_adj_matrix); //
             graph_pub_->publish(graph);
             clusters_pub_->publish(Graphclusters);
         }    

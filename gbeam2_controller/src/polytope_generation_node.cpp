@@ -233,7 +233,6 @@ private:
         int num_stopped = 0;
         bool reset=false;
         int iter = 0, max_iter = (scan->range_max - start_dist) / dist_step;
-        RCLCPP_INFO(this->get_logger(),"max_iter: %d",max_iter);
         int iter_dist =0, trigger_dist_step = node_dist_open / dist_step;
         while (num_stopped < num_vertices && iter++ < max_iter) {
             for (int v = 0; v < num_vertices; v++) {
@@ -328,7 +327,6 @@ private:
       for(auto& vert_reach:free_poly.polygon.vertices_reachable)
       {
         int N = dist(vert_reach,zero_pos)/node_dist_open;
-        RCLCPP_INFO(this->get_logger(),"Adding %d inside nodes for vertex %d.",N,j);
         gbeam2_interfaces::msg::Vertex vert_in;
         for(int i=1; i<N+1; i++){
             float fraction = static_cast<float>(i) / static_cast<float>(N);
@@ -344,8 +342,9 @@ private:
         }
         j++;
         }
+        free_poly.polygon.inside_reachable.push_back(zero_pos);
 
-      RCLCPP_INFO(this->get_logger(),"Adding %d inside nodes.",free_poly.polygon.inside_reachable.size());
+      //RCLCPP_INFO(this->get_logger(),"Adding %d inside nodes.",free_poly.polygon.inside_reachable.size());
 
       // DEBUG CLOUDPOINT 
       // Prepare the PointCloud2 message
