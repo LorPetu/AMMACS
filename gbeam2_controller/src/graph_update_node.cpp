@@ -528,7 +528,7 @@ private:
         try {
             
             //RCLCPP_INFO(this->get_logger(), "lookupTransform -------> %s to %s", target_frame.c_str(), source_frame.c_str());
-            l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, tf2::TimePointZero); //poly_ptr->header.stamp we get tranformation in the future
+            l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, poly_ptr->header.stamp); //poly_ptr->header.stamp we get tranformation in the future
         } catch (const tf2::TransformException & ex) {
             RCLCPP_WARN(
                 this->get_logger(), "GBEAM:graph_update:lookupTransform: Could not transform %s to %s: %s",
@@ -875,7 +875,7 @@ private:
         // Parameters
         double gamma_min = 0.33; // Min percentage of variation in edge density for batch trigger
         int N_vert_min = 3; // Min number of nodes for batch trigger
-        double min_avg_degree = 3; // Min average degree for batch trigger
+        double min_avg_degree = 2.3; // Min average degree for batch trigger
         // Check variables
         double tot_density_curr;
         double m_local = 0.0;

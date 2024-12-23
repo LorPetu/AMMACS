@@ -44,6 +44,7 @@ public:
         graph_edges_pub = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/graph_edges", 1);
         graph_node_labels_pub = this->create_publisher<visualization_msgs::msg::MarkerArray>("gbeam_visualization/graph_node_labels", 1);
         cluster_nodes_pub_= this->create_publisher<visualization_msgs::msg::MarkerArray>("gbeam_visualization/clusters/centroids",1);
+        cluster_nodes_labels_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("gbeam_visualization/clusters/centroids_labels",1);
         cluster_edges_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("gbeam_visualization/clusters/edges",1);
 
         graph_sub = this->create_subscription<gbeam2_interfaces::msg::Graph>(
@@ -80,6 +81,7 @@ private:
     rclcpp::Subscription<gbeam2_interfaces::msg::GraphCluster>::SharedPtr cluster_graph_sub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr cluster_edges_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr cluster_nodes_pub_;  
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr cluster_nodes_labels_pub_;  
 
     float scaling;
 
@@ -360,7 +362,7 @@ private:
 
         // Publish markers
         cluster_nodes_pub_->publish(centroid_points);
-        cluster_nodes_pub_->publish(text_markers); // Publish text markers
+        cluster_nodes_labels_pub_->publish(text_markers); // Publish text markers
         cluster_edges_pub_->publish(edges_markers);
 
         text_markers.markers.clear();

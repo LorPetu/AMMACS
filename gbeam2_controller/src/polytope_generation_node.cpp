@@ -196,7 +196,7 @@ private:
 
         for(int v=0; v<num_vertices; v++)
           {
-            float vert_angle = v*angle_diff_vert + angle_diff_vert/2; // + offset_angle;
+            float vert_angle = v*angle_diff_vert + angle_diff_vert/2;// + offset_angle;
             vert_directions[v].x = cos(vert_angle);
             vert_directions[v].y = sin(vert_angle);
             vert_directions[v].z = 0;
