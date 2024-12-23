@@ -675,7 +675,7 @@ gbeam2_interfaces::msg::GraphEdge computeEdge(gbeam2_interfaces::msg::Vertex ver
 {
   gbeam2_interfaces::msg::GraphEdge edge;
   edge.v1 = vert1.id; edge.v2 = vert2.id;
-  edge.length = sqrt(distSq(vert1, vert2));
+  edge.length = dist(vert1, vert2);
   edge.direction.x = vert2.x - vert1.x;
   edge.direction.y = vert2.y - vert1.y;
   edge.direction.z = 0;

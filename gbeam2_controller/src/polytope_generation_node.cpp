@@ -7,8 +7,14 @@
 #include "geometry_msgs/msg/polygon.hpp"
 #include "geometry_msgs/msg/point32.hpp"
 
+#include "nav_msgs/msg/odometry.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+
+
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "sensor_msgs/msg/point_cloud.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
+#include <sensor_msgs/point_cloud2_iterator.hpp> 
 
 // da inserire nella cartella include 
 #include "gbeam2_interfaces/msg/free_polygon.hpp"
@@ -35,8 +41,10 @@ public:
     free_poly_publisher_ = this->create_publisher<gbeam2_interfaces::msg::FreePolygonStamped>(
         "gbeam/free_polytope", 1);
 
-    test_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud>(
+    test_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
     "gbeam/test", 1);
+    odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            name_space+ "odom", 1, std::bind(&PolyGenNode::odomCallback, this, std::placeholders::_1));
 
     name_space = this->get_namespace();
     name_space_id = name_space.back()- '0';
@@ -58,6 +66,7 @@ public:
     this->declare_parameter<double>("safe_dist",0.0);
     this->declare_parameter<double>("update_freq",2.0);
     this->declare_parameter<float>("obst_dist_min", 0.0);
+    this->declare_parameter<double>("node_dist_open", 0.0);
     
 
     // Get parameter from yaml file
@@ -68,6 +77,7 @@ public:
     safe_dist = this->get_parameter("safe_dist").get_parameter_value().get<double>();
     update_freq = this->get_parameter("update_freq").get_parameter_value().get<double>();
     obst_dist_min = this->get_parameter("obst_dist_min").get_parameter_value().get<double>();
+    node_dist_open = this->get_parameter("node_dist_open").get_parameter_value().get<double>();
 
     RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF POLYTOPE_GEN: ############# ");
     RCLCPP_INFO(this->get_logger(),"1) NUM_VERTICES: %d", num_vertices);
@@ -77,6 +87,7 @@ public:
     RCLCPP_INFO(this->get_logger(),"5) SAFE_DIST: %f", safe_dist);
     RCLCPP_INFO(this->get_logger(),"6) UPDATE_FREQ: %f", update_freq);
     RCLCPP_INFO(this->get_logger(),"7) OBST_DIST_MIN: %f", obst_dist_min);
+    RCLCPP_INFO(this->get_logger(),"8) NODE_DIST_OPEN: %f", node_dist_open);
 
 
     timer_ = this->create_wall_timer(
@@ -93,6 +104,11 @@ private:
   double update_freq ;
   float obst_dist_min; 
   double offset_angle=0;
+  float node_dist_open;
+  nav_msgs::msg::Odometry robot_odom_;
+  sensor_msgs::msg::PointCloud2 inside_points;
+  std::unordered_map<int,float> vertToDist;
+  std::vector<geometry_msgs::msg::Point32> inside_vertices;
 
   std::string name_space;
   int name_space_id;
@@ -101,15 +117,22 @@ private:
 
   rclcpp::Publisher<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr free_poly_publisher_;
 
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr test_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr test_publisher_;
 
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_subscriber_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
   
   rclcpp::TimerBase::SharedPtr timer_;
 
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr scan_ptr)
   {
     scan = scan_ptr;        //forse qua è scan senza _
+  }
+
+  void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom_ptr)
+  {
+      robot_odom_ = *odom_ptr;
+      //RCLCPP_INFO(this->get_logger(),"odom received: x:%f y:%f",robot_odom_.pose.pose.position.x,robot_odom_.pose.pose.position.y);
   }
 
   void updateParam(){
@@ -163,7 +186,7 @@ private:
 
       }
 
-      test_publisher_->publish(obstacles);
+      //test_publisher_->publish(obstacles);
       //-------------------------------------------------------------------------------------------------
 
       //---------------------- Initialization of polygon vertices directions ----------------------------
@@ -173,14 +196,14 @@ private:
 
         for(int v=0; v<num_vertices; v++)
           {
-            float vert_angle = v*angle_diff_vert + angle_diff_vert/2 + offset_angle;
+            float vert_angle = v*angle_diff_vert + angle_diff_vert/2;// + offset_angle;
             vert_directions[v].x = cos(vert_angle);
             vert_directions[v].y = sin(vert_angle);
             vert_directions[v].z = 0;
           }
         
-        offset_angle+=10;
-        if(offset_angle==360) offset_angle=0;
+        //offset_angle+=10;
+        //if(offset_angle==360) offset_angle=0;
       //-------------------------------------------------------------------------------------------------
 
 
@@ -198,10 +221,19 @@ private:
         }
       //-------------------------------------------------------------------------------------------------
 
+      inside_vertices.clear();
+
+      geometry_msgs::msg::Point32 vert_pos; 
+      vert_pos.x = 0.0; vert_pos.y = 0.0; vert_pos.z = 0.0;
+      // vert_pos.x = robot_odom_.pose.pose.position.x; vert_pos.y = robot_odom_.pose.pose.position.y; vert_pos.z = robot_odom_.pose.pose.position.z;
+
+      inside_vertices.push_back(vert_pos);
 
       //----------------- Increase polygon until reaching obstacle or max_distance  
-       int num_stopped = 0;
+        int num_stopped = 0;
+        bool reset=false;
         int iter = 0, max_iter = (scan->range_max - start_dist) / dist_step;
+        int iter_dist =0, trigger_dist_step = node_dist_open / dist_step;
         while (num_stopped < num_vertices && iter++ < max_iter) {
             for (int v = 0; v < num_vertices; v++) {
                 if (move_vertex[v]) {
@@ -215,17 +247,16 @@ private:
                         move_vertex[v] = false;
                         num_stopped++;
                     }
-                    
+                                        
                 }
 
 
             }
-
-          
         }
         
       //------------------------------------------------------------------------------------------------
 
+      
 
       //---------------------------- Initialize free poly ----------------------------------------------
           
@@ -256,7 +287,7 @@ private:
           exp_gain++;
           float step = abs(scan->ranges[o]-scan->ranges[o+1]);
           float tmp = step>scan->range_max ? 0 : step / obst_dist_min;
-          if( tmp>1){
+          if(tmp>1){
             //ROS_INFO("vertex: %d   ## tmp value: %f", v, tmp);
             //ROS_INFO("Vertex position: x:%f  y:%f",vert_obs.x,vert_obs.y);
             //ROS_INFO("range_max: %f", scan->range_max);
@@ -289,6 +320,71 @@ private:
         free_poly.polygon = createReachablePolygon(free_poly.polygon, safe_dist);
       //---------------------------------------------------------------------------------------------------
 
+      // Populate Inside Reachable
+      gbeam2_interfaces::msg::Vertex zero_pos;
+      zero_pos.belong_to = name_space_id;
+      int j=0;
+      for(auto& vert_reach:free_poly.polygon.vertices_reachable)
+      {
+        int N = dist(vert_reach,zero_pos)/node_dist_open;
+        gbeam2_interfaces::msg::Vertex vert_in;
+        for(int i=1; i<N+1; i++){
+            float fraction = static_cast<float>(i) / static_cast<float>(N);
+           
+            vert_in.x = fraction*vert_reach.x;
+            vert_in.y = fraction*vert_reach.y;
+            vert_in.z = vert_reach.x;
+            vert_in.gain = 0;
+            vert_in.is_visited = false;
+            vert_in.is_reachable = false;
+            vert_in.is_obstacle = false;
+            free_poly.polygon.inside_reachable.push_back(vert_in);
+        }
+        j++;
+        }
+        free_poly.polygon.inside_reachable.push_back(zero_pos);
+
+      //RCLCPP_INFO(this->get_logger(),"Adding %d inside nodes.",free_poly.polygon.inside_reachable.size());
+
+      // DEBUG CLOUDPOINT 
+      // Prepare the PointCloud2 message
+      inside_points.header = scan->header;
+
+      // Reserve space for the points and the additional "side" field
+      inside_points.height = 1;                  // Unordered point cloud (1D array)
+      inside_points.is_dense = false;            // Allow for possible invalid points
+      int total_points = free_poly.polygon.inside_reachable.size();
+      inside_points.width = total_points;        // Number of points
+
+      // Define the PointCloud2 fields
+      sensor_msgs::PointCloud2Modifier modifier(inside_points);
+      modifier.setPointCloud2Fields(3,  // Number of fields: x, y, z, and side
+          "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "z", 1, sensor_msgs::msg::PointField::FLOAT32); 
+
+      modifier.resize(total_points);  // Resize the point cloud to accommodate all points
+
+      // Use iterators for better handling of PointCloud2
+      sensor_msgs::PointCloud2Iterator<float> iter_x(inside_points, "x");
+      sensor_msgs::PointCloud2Iterator<float> iter_y(inside_points, "y");
+      sensor_msgs::PointCloud2Iterator<float> iter_z(inside_points, "z");
+          
+        for(auto& vert:free_poly.polygon.inside_reachable){
+
+          *iter_x = vert.x;
+          *iter_y = vert.y;
+          *iter_z = vert.z;
+         
+          
+          ++iter_x;
+          ++iter_y;
+          ++iter_z;
+
+        }
+
+
+      test_publisher_->publish(inside_points);
 
       // ------------------------ Publishing the generated polygon ----------------------------------------
       free_poly_publisher_->publish(free_poly);

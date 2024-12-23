@@ -36,6 +36,7 @@
 
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "std_msgs/msg/float32_multi_array.hpp"
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp> // For easier point cloud population
@@ -81,9 +82,8 @@ public:
         external_poly_sub_ = this->create_subscription<gbeam2_interfaces::msg::FreePolygonStamped>(
             "external_nodes", 1, std::bind(&GraphUpdateNode::extNodesCallback, this, std::placeholders::_1));
 
-        point_cloud_publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-        "merged_obstacles",1);
-
+        batch_values_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("batch_values",1);
+        batch_values.data.resize(4);
         
         // SERVICE
         status_server_ = this->create_service<gbeam2_interfaces::srv::SetMappingStatus>(
@@ -193,9 +193,25 @@ private:
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr poly_sub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr external_poly_sub_;
     rclcpp::Service<gbeam2_interfaces::srv::SetMappingStatus>::SharedPtr status_server_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr batch_values_pub_;
+    std_msgs::msg::Float32MultiArray batch_values;
+    
+    
 
     void logDoubleVector(rclcpp::Logger logger, const std::vector<double>& vec, const std::string& vec_name = "vector") {
+        std::ostringstream oss;
+        oss << vec_name << ": [";
+        for (size_t i = 0; i < vec.size(); ++i) {
+            oss << vec[i];
+            if (i < vec.size() - 1) {
+                oss << ", ";
+            }
+        }
+        oss << "]";
+        RCLCPP_INFO(logger, "%s", oss.str().c_str());
+    }
+
+    void logIntVector(rclcpp::Logger logger, const std::vector<int>& vec, const std::string& vec_name = "vector") {
         std::ostringstream oss;
         oss << vec_name << ": [";
         for (size_t i = 0; i < vec.size(); ++i) {
@@ -422,10 +438,15 @@ private:
         //std::vector<gbeam2_interfaces::msg::GraphClusterNode, std::allocator<gbeam2_interfaces::msg::GraphClusterNode>>::iterator it
         double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
         double tot_gain=0.0;
+        it->unexplored_nodes.clear();
         for(auto& node_id:it->nodes){
             sum_x += graph.nodes[node_id].x;
             sum_y += graph.nodes[node_id].y;
             sum_z += graph.nodes[node_id].z;
+
+            if(graph.nodes[node_id].gain>0){
+                it->unexplored_nodes.push_back(node_id);
+            }
 
             tot_gain+=graph.nodes[node_id].gain;
         }
@@ -507,7 +528,7 @@ private:
         try {
             
             //RCLCPP_INFO(this->get_logger(), "lookupTransform -------> %s to %s", target_frame.c_str(), source_frame.c_str());
-            l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, tf2::TimePointZero); //poly_ptr->header.stamp we get tranformation in the future
+            l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, poly_ptr->header.stamp); //poly_ptr->header.stamp we get tranformation in the future
         } catch (const tf2::TransformException & ex) {
             RCLCPP_WARN(
                 this->get_logger(), "GBEAM:graph_update:lookupTransform: Could not transform %s to %s: %s",
@@ -577,7 +598,7 @@ private:
             }
             
         }
-        for (int i=0; i<poly_ptr->polygon.vertices_obstacles.size(); i++)
+        /*for (int i=0; i<poly_ptr->polygon.vertices_obstacles.size(); i++)
         {
             gbeam2_interfaces::msg::Vertex vert = poly_ptr->polygon.vertices_obstacles[i];  //get vertex from polytope
             vert.belong_to = name_space_id;
@@ -602,25 +623,73 @@ private:
             if ((vert_dist > node_dist_min && vert_ext_dist> node_dist_min) && vert.is_obstacle)
             {
                 
+                vert.id = graph.nodes.size();
+                vert.gain ++;
+                vert.cluster_id = -2;
+                if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
+                {
+                    vert.is_reachable = false;
+                    vert.gain = 0;
+                }
+
+                addNode(graph,vert);         //add vertex to the graph
+                if(vert.is_reachable){
+                    RCLCPP_INFO(this->get_logger(),"!?!?!?!?!?!!?!? OBSTACLE Vertex %d is reachable !?!?!?!?",i);                    
+                    new_reach_node.push_back(vert);}
+                is_changed = true;
+            }
+            else if (vert_ext_dist< node_dist_open)
+            {
+                RCLCPP_INFO(this->get_logger(),"OBSTACLE Vertex %d wasn't added due to conflict with external nodes",i);
+            }
+        }*/
+
+        for (int i=0; i<poly_ptr->polygon.inside_reachable.size(); i++)
+        {
+            //RCLCPP_INFO(this->get_logger(),"entrato nel primo for -------> ");
+            gbeam2_interfaces::msg::Vertex vert = poly_ptr->polygon.inside_reachable[i];  //get vertex from polytope
+            vert.belong_to = name_space_id;
+            vert.cluster_id = -1;
+            vert = vert_transform(vert, l2g_tf); //change coordinates to global position
+
+            float vert_dist = vert_graph_distance_noobstacle(graph, vert);
+            // vert = applyBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys);
+
+            /// ####### NEW PART FOR COMMUNICATION ############
+            float vert_ext_dist; 
+            if(received_ext_nodes && external_nodes.polygon.inside_reachable.size()!=0){
+                gbeam2_interfaces::msg::Graph fake_graph;
+                fake_graph.nodes = external_nodes.polygon.inside_reachable;
+                vert_ext_dist = vert_graph_distance_noobstacle(fake_graph, vert);
+            }
+            else{
+                vert_ext_dist = INF;
+            }
+            // ################################################
+
+            if (vert_dist > node_dist_open && vert_ext_dist> node_dist_open) // modified also this condition
+            {
             vert.id = graph.nodes.size();
+            vert.is_reachable = true;
             vert.gain ++;
             if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
             {
                 vert.is_reachable = false;
                 vert.gain = 0;
             }
-
-            addNode(graph,vert);         //add vertex to the graph
+            addNode(graph,vert); //add vertex to the graph
             if(vert.is_reachable) new_reach_node.push_back(vert);
             is_changed = true;
             }
             else if (vert_ext_dist< node_dist_open)
             {
-                RCLCPP_INFO(this->get_logger(),"OBSTACLE Vertex %d wasn't added due to conflict with external nodes",i);
+                RCLCPP_INFO(this->get_logger(),"REACHABLE Vertex %d wasn't added due to conflict with external nodes",i);
             }
+            
         }
 
         auto new_adj_matrix = GraphAdj2matrix(graph.adj_matrix);
+        //printMatrix(this->get_logger(),new_adj_matrix);
 
         int N = new_adj_matrix.size();
         double m = 0.0;
@@ -653,13 +722,14 @@ private:
         std::vector<int> inReachableId;
         std::vector<int> inObstacleNotReachableId;
         for (int i=0; i<graph.nodes.size(); i++)
-            if(isInsideObstacles(polyGlobal,graph.nodes[i])){
-                if (isInsideReachable(polyGlobal, graph.nodes[i])){
-                    inReachableId.push_back(i);
-                }else{
-                    if(graph.nodes[i].is_obstacle) inObstacleNotReachableId.push_back(i);
-                }
+            if(isInsideReachable(polyGlobal,graph.nodes[i])){
+                
+                inReachableId.push_back(i);
+                
             }
+
+        //RCLCPP_INFO(this->get_logger(),"Graphs node inside reachable: %d", inReachableId.size());
+        //logIntVector(this->get_logger(), inReachableId);
             
 
         
@@ -669,15 +739,18 @@ private:
             {
             if (new_adj_matrix[inReachableId[i]][inReachableId[j]] == -1) 
             {
+                
                 //then add edge i-j to graph
                 gbeam2_interfaces::msg::Vertex& node_i = graph.nodes[inReachableId[i]];
                 gbeam2_interfaces::msg::Vertex& node_j = graph.nodes[inReachableId[j]]; 
                 gbeam2_interfaces::msg::GraphEdge edge = computeEdge(node_i, node_j, node_bound_dist);
                 edge.id = graph.edges.size();
+              
                 if(!node_i.is_obstacle && !node_j.is_obstacle && edge.length < max_lenght_edge){
                     if(isInsideReachable(polyGlobal, node_i) && isInsideReachable(polyGlobal, node_j))
                     edge.is_walkable = true;  // if both vertices are inside reachable poly, then the edge is walkable
                     graph.edges.push_back(edge);
+                    
 
                     //update adjacency matrix
                     new_adj_matrix[inReachableId[i]][inReachableId[j]] = edge.id;
@@ -699,7 +772,7 @@ private:
             }
             }
         }
-
+        /*
         for (int i=0; i<inObstacleNotReachableId.size(); i++)
         {
            for (int j=i+1; j<inObstacleNotReachableId.size(); j++)
@@ -726,7 +799,7 @@ private:
 
                 }
             }
-        }
+        }*/
         
 
         graph.adj_matrix=matrix2GraphAdj(new_adj_matrix);
@@ -802,7 +875,7 @@ private:
         // Parameters
         double gamma_min = 0.33; // Min percentage of variation in edge density for batch trigger
         int N_vert_min = 3; // Min number of nodes for batch trigger
-        double min_avg_degree = 3; // Min average degree for batch trigger
+        double min_avg_degree = 2.3; // Min average degree for batch trigger
         // Check variables
         double tot_density_curr;
         double m_local = 0.0;
@@ -852,14 +925,41 @@ private:
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1>0.7) cluster_state=2;
             } else{
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=2;
-            }    
+            } 
+
+            int N_clusters = cluster_adj_matrix.size();
+            cluster_adj_matrix.assign(N_clusters, std::vector<float>(N_clusters, 0.0f)); 
+
+            for (auto& cl_i : Graphclusters.clusters) {
+                for (auto& node_id : cl_i.nodes) {
+                    gbeam2_interfaces::msg::Vertex cl_node=graph.nodes[node_id];
+                    for (int neigh_id:graph.nodes[node_id].neighbors) {
+                        // Determine the cluster ID of the neighbor node
+                        int neigh_cluster_id = graph.nodes[neigh_id].cluster_id;  
+                        if (neigh_cluster_id != -1) {
+                           cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                        }
+                        
+                    }
+                }
+            }  
+
+            batch_values.data[0] = (avg_degree>min_avg_degree) ? min_avg_degree : avg_degree;
+            batch_values.data[1] = (V_1>N_vert_min) ? N_vert_min : V_1;
+            batch_values.data[2] = abs(tot_density_curr - gamma_1)/gamma_1;
+
+            batch_values_pub_->publish(batch_values);
 
         }
            
 
-        RCLCPP_INFO(this->get_logger(), "Case: %d ||gamma_1: %f Average degree: %f",cluster_state,gamma_1,avg_degree);
+        //RCLCPP_INFO(this->get_logger(), "Case: %d ||gamma_1: %f Average degree: %f",cluster_state,gamma_1,avg_degree);
 
         // Evaluate delta between density and switch logic
+
+        // Update Global Clustering connection in the adjacency matrix
+
+        
 
         // LOCAL CLUSTERING with just added node and edges
 
@@ -870,14 +970,17 @@ private:
             new_cluster.is_unmergeable=true;
             computeClusterProperties(new_cluster);
             Graphclusters.clusters.push_back(new_cluster);
-            RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
-
-            clusters_pub_->publish(Graphclusters);
+            //RCLCPP_INFO(this->get_logger(), " ###### Created the FIRST new cluster! ######");
 
             //RESET
             tot_density_curr = 0.0;
             m_local=0.0;
             avg_degree=0.0;
+            batch_values.data[0] = 0.0;
+            batch_values.data[1] = 0.0;
+            batch_values.data[2] = 0.0;
+
+            batch_values_pub_->publish(batch_values);
             
             update_batch.clear();
             cluster_state=0;
@@ -887,6 +990,7 @@ private:
             ClusterNode_coeff.clear();
             ClusterNode_to_comm.clear();
             gamma_1 = std::numeric_limits<double>::quiet_NaN();
+            
 
         }else if(cluster_state==2){ // Evaluate clustering coefficient and create new cluster
             bool mod_gain_increase=true;
@@ -1010,8 +1114,8 @@ private:
                
             }
 
-            // Inizialization: Readapte cluster mapping to describe global commmunities 
-            //unclustered_nodes.clear();
+            // Inizialization: Readapt cluster mapping to describe global commmunities 
+            // unclustered_nodes.clear();
 
             // Inizialization: Populate the GraphCluster weight matrix 
             // We want to identify all the edges INSIDE the cluster to make them self loop on a global level 
@@ -1048,7 +1152,7 @@ private:
                 ClusterNode_coeff[cl_i.cluster_id] = -1.0;
             }
 
-            printMatrix(this->get_logger(),cluster_adj_matrix);
+            //printMatrix(this->get_logger(),cluster_adj_matrix);
 
             mod_gain_increase=true;
             max_iterations=0;
@@ -1103,79 +1207,19 @@ private:
                 max_iterations++;
                 RCLCPP_INFO(this->get_logger(), "Iteration %d completed.", max_iterations);
                 
-            }
-
-            
-      
-
-            // DEBUG CLOUDPOINT 
-            // Prepare the PointCloud2 message
-            sensor_msgs::msg::PointCloud2 cloud_msg;
-            cloud_msg.header.stamp = this->now();  // Set timestamp
-            cloud_msg.header.frame_id = "world";     // Set frame ID (adjust if necessary)
-
-            // Reserve space for the points and the additional "side" field
-            cloud_msg.height = 1;                  // Unordered point cloud (1D array)
-            cloud_msg.is_dense = false;            // Allow for possible invalid points
-            int total_points = 0;
-            for(auto& cluster:Graphclusters.clusters){
-                total_points+= cluster.nodes.size();
-            }
-            cloud_msg.width = total_points;        // Number of points
-
-            // Define the PointCloud2 fields
-            sensor_msgs::PointCloud2Modifier modifier(cloud_msg);
-            modifier.setPointCloud2Fields(4,  // Number of fields: x, y, z, and side
-                "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-                "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-                "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-                "comp", 1, sensor_msgs::msg::PointField::FLOAT32); 
-
-            modifier.resize(total_points);  // Resize the point cloud to accommodate all points
-
-            // Use iterators for better handling of PointCloud2
-            sensor_msgs::PointCloud2Iterator<float> iter_x(cloud_msg, "x");
-            sensor_msgs::PointCloud2Iterator<float> iter_y(cloud_msg, "y");
-            sensor_msgs::PointCloud2Iterator<float> iter_z(cloud_msg, "z");
-            sensor_msgs::PointCloud2Iterator<float> iter_comp(cloud_msg, "comp");
-
-            // Fill the data in row-major order (first all values of reach_node_label, then all values of field_vector)
-            int i=0;
-            for (auto cluster : Graphclusters.clusters) {
-                for(int id:cluster.nodes){
-                if (id < 0 || id >= graph.nodes.size()) {
-                    RCLCPP_ERROR(this->get_logger(), "Invalid node ID: %d. Skipping.", id);
-                    continue;
-                }
-                auto node = graph.nodes[id];
-                *iter_x = node.x;
-                *iter_y = node.y;
-                *iter_z = node.z;
-                *iter_comp = cluster.cluster_id; 
-                
-                ++iter_x;
-                ++iter_y;
-                ++iter_z;
-                ++iter_comp;
-
-                i++;
-                }
-                
-            }
-            // Process obstacles and reachables
-
-            // Publish the point cloud
-            point_cloud_publisher_->publish(cloud_msg);
-
-            
+            }            
 
             RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
 
-            
-            clusters_pub_->publish(Graphclusters);
-
             tot_density_curr = 0.0;
             avg_degree=0.0;
+
+            batch_values.data[0] = 0.0;
+            batch_values.data[1] = 0.0;
+            batch_values.data[2] = 0.0;
+
+            batch_values_pub_->publish(batch_values);
+
             update_batch.clear();
             cluster_state=0;
             louvain_Com.clusters.clear();
@@ -1189,55 +1233,60 @@ private:
         }
         // Remove empty clusters and reassign enumeration
         // Reassign also cluster_id for each vertex
-        int new_id = 0;
-        std::vector<int> old_to_new_id(Graphclusters.clusters.size(), -1); // Map old cluster IDs to new IDs
-
-        for (auto it = Graphclusters.clusters.begin(); it != Graphclusters.clusters.end();) {
-            if (!it->nodes.empty()) {
-                computeClusterProperties(it); // Recompute centroid and other properties
-                it->cluster_id = new_id;
-                it->is_unmergeable = (it->nodes.size() > 2);
-
-                // Update graph node references
-                for (auto& node_id : it->nodes) {
-                    graph.nodes[node_id].cluster_id = new_id;
-                }
-
-                old_to_new_id[it - Graphclusters.clusters.begin()] = new_id; // Map old ID to new ID
-                ++new_id;
-                ++it;
-            } else {
-                RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
-                it = Graphclusters.clusters.erase(it); // Safely remove empty clusters
-            }
-        }
-
-        // Resize the cluster adjacency matrix
-        size_t new_size = new_id; // Total number of clusters after cleanup
-        std::vector<std::vector<float>> updated_adj_matrix(new_size, std::vector<float>(new_size, 0.0));
-
-        // Rebuild the adjacency matrix using the updated cluster IDs
-        for (int i = 0; i < cluster_adj_matrix.size(); ++i) {
-            for (int j = i; j < cluster_adj_matrix[i].size(); ++j) {
-                if (old_to_new_id[i] != -1 && old_to_new_id[j] != -1) {
-                    int new_i = old_to_new_id[i];
-                    int new_j = old_to_new_id[j];
-                    updated_adj_matrix[new_i][new_j] = cluster_adj_matrix[i][j];
-                    updated_adj_matrix[new_j][new_i] = cluster_adj_matrix[i][j];
-                }
-            }
-        }
-
-        //printMatrix(this->get_logger(),updated_adj_matrix);
-
-        Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
-
-
-
         // publish graph if some change has occurred
-        if(is_changed)
-            graph_pub_->publish(graph);
+        if(is_changed){
+            int new_id = 0;
+            std::vector<int> old_to_new_id(Graphclusters.clusters.size(), -1); // Map old cluster IDs to new IDs
+
+            for (auto it = Graphclusters.clusters.begin(); it != Graphclusters.clusters.end();) {
+                if (!it->nodes.empty()) {
+                    computeClusterProperties(it); // Recompute centroid and other properties
+                    it->cluster_id = new_id;
+                    it->is_unmergeable = (it->nodes.size() > 2);
+
+                    // Update graph node references
+                    for (auto& node_id : it->nodes) {
+                        graph.nodes[node_id].cluster_id = new_id;
+                    }
+
+                    old_to_new_id[it - Graphclusters.clusters.begin()] = new_id; // Map old ID to new ID
+                    ++new_id;
+                    ++it;
+                } else {
+                    RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
+                    it = Graphclusters.clusters.erase(it); // Safely remove empty clusters
+                }
+            }
+
+            // Resize the cluster adjacency matrix
+            int new_size = new_id; // Total number of clusters after cleanup
+            std::vector<std::vector<float>> updated_adj_matrix(new_size, std::vector<float>(new_size, 0.0));
+
+            // Rebuild the adjacency matrix using the updated cluster IDs
+            for (int i = 0; i < cluster_adj_matrix.size(); ++i) {
+                for (int j = i; j < cluster_adj_matrix[i].size(); ++j) {
+                    if (old_to_new_id[i] != -1 && old_to_new_id[j] != -1) {
+                        int new_i = old_to_new_id[i];
+                        int new_j = old_to_new_id[j];
+                        updated_adj_matrix[new_i][new_j] = cluster_adj_matrix[i][j];
+                        updated_adj_matrix[new_j][new_i] = cluster_adj_matrix[i][j];
+                    }
+                }
+            }
+
             
+
+            Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
+
+        
+
+
+
+        
+            ////printMatrix(this->get_logger(),updated_adj_matrix); //
+            graph_pub_->publish(graph);
+            clusters_pub_->publish(Graphclusters);
+        }    
         if(is_changed && received_ext_nodes)   received_ext_nodes = false;
     
         //end of polyCallback
