@@ -26,11 +26,10 @@ set(msg_files
   "msg/GraphAdjacency.msg"
   "msg/Graph.msg"
   "msg/Status.msg"
-  "msg/FrontierStamped.msg"
-  "msg/FrontierStampedArray.msg"
-  "msg/FieldlerInfo.msg"
   "msg/GraphClusterNode.msg"
   "msg/GraphCluster.msg"
+  "msg/GraphUpdate.msg"
+  "msg/Bridge.msg"
   "srv/SetMappingStatus.srv"
   "srv/GraphUpdate.srv"
 )

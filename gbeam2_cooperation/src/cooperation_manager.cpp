@@ -27,22 +27,12 @@
 #include "std_msgs/msg/float32_multi_array.hpp"
 
 #include "gbeam2_interfaces/msg/status.hpp"
-#include "gbeam2_interfaces/msg/frontier_stamped.hpp"
-#include "gbeam2_interfaces/msg/frontier_stamped_array.hpp"
-#include "gbeam2_interfaces/msg/fieldler_info.hpp"
 #include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
 #include "library_fcn.hpp"
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp> // For easier point cloud population
 
-#include <Eigen/Dense>
-#include <Spectra/SymEigsSolver.h>
-#include <Spectra/MatOp/SparseSymMatProd.h>
-
-using namespace Eigen;
-using namespace Spectra;
-using namespace std;
 
 #define INF 100000
 
@@ -139,13 +129,9 @@ public:
     assigned_graph_pub_ = this->create_publisher<gbeam2_interfaces::msg::Graph>(
       "gbeam/assigned_graph",1);
 
-    frontier_pub_ = this->create_publisher<gbeam2_interfaces::msg::FrontierStampedArray>(
-      "frontier",1);
-
     start_frontiers_service_ = this->create_service<std_srvs::srv::SetBool>(
         "start_frontier",std::bind(&CooperationNode::startFrontier,this, std::placeholders::_1, std::placeholders::_2));
 
-    fiedler_vector_pub_ = this->create_publisher<gbeam2_interfaces::msg::FieldlerInfo>("fieldler_vector",1);
 
     //cluster_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&CooperationNode::CreateClusterGraph, this));
 
@@ -180,10 +166,6 @@ public:
       last_status[i].normal_joint_vector.resize(N_robot);
     }
 
-    
-
-    
-
   }
 
 private:
@@ -210,7 +192,6 @@ private:
   //Frontiers variables
   int N_my_frontiers = 0;
   std::pair<gbeam2_interfaces::msg::Vertex, gbeam2_interfaces::msg::Vertex> obs_min_pair;
-  gbeam2_interfaces::msg::FrontierStampedArray res_frontier_array;
   bool has_bridge = false;
   double dist_ij;
   std::vector<gbeam2_interfaces::msg::Vertex> candidates_reach_nodes;
@@ -243,12 +224,10 @@ private:
   // Declare topics variables
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
   rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr merged_graph_sub_;
-  rclcpp::Publisher<gbeam2_interfaces::msg::FrontierStampedArray>::SharedPtr frontier_pub_;
   rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
   rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr assigned_graph_pub_;
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  start_frontiers_service_;
-  rclcpp::Publisher<gbeam2_interfaces::msg::FieldlerInfo>::SharedPtr fiedler_vector_pub_;
 
   //rclcpp::TimerBase::SharedPtr cluster_timer_;
 
@@ -377,120 +356,12 @@ private:
 
   }
   
-  void computeSecondSmallestEigen(MatrixXd& laplacianMatrix, VectorXd& eigenvalues, VectorXd& fiedler_vector, VectorXd& fiedler_vector2, int N)
-{
 
-    // We are going to calculate the eigenvalues of M
-
-    // Construct matrix operation object using the wrapper class DenseSymMatProd
-    DenseSymMatProd<double> op(laplacianMatrix);
-
-    // Construct eigen solver object, requesting the largest three eigenvalues
-    SymEigsSolver<DenseSymMatProd<double>> eigs(op, 3, N);
-
-    // Initialize and compute
-    eigs.init();
-    eigs.compute(SortRule::SmallestAlge);
-    std::ostringstream oss;
-
-    // Retrieve results
   
-    if(eigs.info() == CompInfo::Successful){
-        eigenvalues = eigs.eigenvalues();
-
-        Eigen::MatrixXd evectors = eigs.eigenvectors();
-       
-        fiedler_vector = evectors.col(1);
-        fiedler_vector2 = evectors.col(2);
-
-
-         // Convert the eigenvalues to a string
-        std::stringstream eigenvalues_stream;
-        eigenvalues_stream << eigenvalues;
-        std::string eigenvalues_str = eigenvalues_stream.str();
-
-        // Log the eigenvalues using RCLCPP
-        RCLCPP_INFO(this->get_logger(), "Eigenvalues found:\n%s", eigenvalues_str.c_str());
-    } else{
-      RCLCPP_INFO(this->get_logger(),"Something went wrong computing eigenvalues!");      
-    }
-    
-
-    return;
-}
- 
-  Eigen::MatrixXd getGraphMatrixes(){
-    
-    reach_node_label.clear();
-
-    std::vector<gbeam2_interfaces::msg::Vertex> nodes = stored_Graph[name_space_id]->nodes;
-
-    for(auto& node:nodes){
-        if(!node.is_obstacle){
-            reach_node_label.push_back(node.id);
-        }
-    }
-    int N =  stored_Graph[name_space_id]->adj_matrix.size;
-    int N_reach = reach_node_label.size();
-    Eigen::MatrixXd reach_mat(N_reach,N_reach);
-
-    int row = 0;
-    int col = 0;
-
-    for (int i:reach_node_label) {
-        for (int j:reach_node_label) {
-            int el = stored_Graph[name_space_id]->adj_matrix.data[i * N + j];
-            
-            if(i==j){
-                int degree = nodes[i].neighbors.size();  // Degree is the number of neighbors
-                reach_mat(row,col) = degree;
-            }else{
-                if(el>-1){
-                    reach_mat(row,col) = -1;
-                }else{
-                    reach_mat(row,col) = 0;
-                }
-                } 
-                col++;
-        }
-        row++;
-        col=0;
-    }
-
-    return reach_mat;
-  }
 
   void startFrontier(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response){
       start_frontier=request->data; 
 
-      gbeam2_interfaces::msg::FieldlerInfo msg;
-
-      //Eigen::MatrixXd laplacianMatrix;
-      Eigen::MatrixXd laplacianMatrix = getGraphMatrixes();
-
-      //printMatrix(laplacianMatrix, reach_node_label);  // Assuming reach_node_label is in scope
-      
-      // Variables to store the second smallest eigenvalue and the Fiedler vector
-      VectorXd eigenvalues;
-      VectorXd fiedler_vector;
-      VectorXd fiedler_vector2;
-
-      // Compute the second smallest eigenvalue and its corresponding eigenvector
-      computeSecondSmallestEigen(laplacianMatrix, eigenvalues, fiedler_vector, fiedler_vector2, reach_node_label.size()*3/4 );
-
-      RCLCPP_INFO(this->get_logger(),"Fieldler vector has been computed!");
-      //plotEigenvector(eigenvalues, reach_node_label);
-
-
-       
-
-      for (int i = 0; i < fiedler_vector2.size(); ++i) {
-          msg.fieldler_vector2.push_back(static_cast<float>(fiedler_vector2(i))); // Second row: Eigen vector values
-      }
-
-      // Publish the message
-      fiedler_vector_pub_->publish(msg);
-      RCLCPP_INFO(this->get_logger(), "Published matrix with %ld columns.", reach_node_label.size());    
   }
 
   void statusCallback(const gbeam2_interfaces::msg::Status::SharedPtr received_status){
@@ -513,99 +384,6 @@ private:
 
 
     // }
-  }
-
- float computeClusterTresh(const std::map<int,float> cluster_values){
-     // Extract the centroids in sorted order by their values
-    std::vector<std::pair<int, float>> sorted_clusters(cluster_values.begin(), cluster_values.end());
-    std::sort(sorted_clusters.begin(), sorted_clusters.end(), [](auto& a, auto& b) {
-        return a.second < b.second;
-    });
-
-    // Calculate distances between contiguous centroids
-    std::vector<float> distances;
-    for (int i = 0; i < sorted_clusters.size() - 1; ++i) {
-        float distance = std::fabs(sorted_clusters[i + 1].second - sorted_clusters[i].second);
-        distances.push_back(distance);
-    }
-
-    // Compute the mean of the contiguous distances
-    float sum_of_distances = 0;
-    for (const auto& dist : distances) {
-        sum_of_distances += dist;
-    }
-    float mean_distance = sum_of_distances / distances.size();
-    float threshold = mean_distance / 2;
-
-   
-    return threshold;
-  }
-
-  void CreateClusterGraph(const VectorXd& fiedler_vector){
-    std::map<int,float> cluster_values;
-    std::map<int,float> cluster_centroids;
-
-    // If there's no cluster first nodes compose the first cluster
-    if(clusterGraph.empty()){
-      int n=0;
-
-      for (int i = 0; i < fiedler_vector.size(); ++i) {
-      float value = static_cast<float>(fiedler_vector(i));
-      fieldler_values.push_back(value);
-      cluster_ids.push_back(0);   
-      n ++;
-      cluster_values[0] +=(cluster_values[0] -value)/n;
-
-      gbeam2_interfaces::msg::GraphClusterNode new_cluster;
-      new_cluster.cluster_id = 0;
-      clusterGraph.push_back(new_cluster);
-    
-    }
-
-      return;
-    } 
-
-    // Re-assign new fieldler vector components to each nodes
-    for (int i = 0; i < fiedler_vector.size(); ++i) {
-      float value = static_cast<float>(fiedler_vector(i));
-      fieldler_values.push_back(value);
-      if(i>cluster_ids.size()){cluster_ids.push_back(-1);}
-      else{
-        int n = std::count(cluster_ids.begin(),cluster_ids.end(),cluster_ids[i]);
-        cluster_values[cluster_ids[i]] += value/n;
-        //if(abs(cluster_values[cluster_ids[i]] - value))
-      }
-    }
-
-    float max_treshold = computeClusterTresh(cluster_values);
-
-    // reverse loop because i want to process first the last added nodes
-    for (int i=reach_node_label.size(); i>=0; --i ){
-      if(cluster_ids[i]==-1){
-        float min_dist =INF;
-        int min_cluster =-1;
-        for(auto& cluster_map:cluster_values){
-          float distance = std::fabs(fiedler_vector[i] - cluster_map.second);
-          if(distance<min_dist) {min_dist = distance; min_cluster=cluster_map.first;}
-        }
-        if(min_dist<max_treshold){// assign node to a cluster
-          cluster_ids[i]=min_cluster;
-        } else{// create a new cluster
-          int N_cluster = cluster_values.size();
-          cluster_values[N_cluster] = fieldler_values[i];
-          gbeam2_interfaces::msg::GraphClusterNode new_cluster;
-
-          new_cluster.cluster_id = N_cluster;
-          clusterGraph.push_back(new_cluster);
-        }
-      }
-    }
-
-    // Compute bridges and connect to other clusters
-    for(auto& cluster:clusterGraph){
-      //Check which node has at least one neighbour that doesn't belong to its own cluster
-    }
-   
   }
 };
 

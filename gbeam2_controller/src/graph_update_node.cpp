@@ -11,6 +11,7 @@
 #include <vector>
 #include <limits>
 #include <sstream>
+#include <iomanip>
 
 
 
@@ -224,7 +225,6 @@ private:
         RCLCPP_INFO(logger, "%s", oss.str().c_str());
     }
 
-#include <iomanip>
 
     void printMatrix(rclcpp::Logger logger, const std::vector<std::vector<float>> &matrix, const std::string &matrix_name = "Matrix") {
     RCLCPP_INFO(logger, "Printing %s:", matrix_name.c_str());
@@ -866,8 +866,8 @@ private:
         // We assume that the second batch compose a new cluster and we focus mainly on assign the nodes "in the middle"
         // or to an existing cluster or otherwhise to the second batch cluster
 
-        V = graph.nodes.size();
-        E = graph.edges.size();
+        //V = graph.nodes.size();
+        //E = graph.edges.size();
 
         auto cluster_adj_matrix = GraphAdj2matrix(Graphclusters.adj_matr);
 

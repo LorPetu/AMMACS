@@ -6,6 +6,5 @@ geometry_msgs/PoseStamped            last_known_target
 geometry_msgs/Vector3[]               joint_vector
 geometry_msgs/Vector3[]               normal_joint_vector
 float32	                            distance
-gbeam2_interfaces/FrontierStamped[]	frontiers
 
 	

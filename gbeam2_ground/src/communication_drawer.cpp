@@ -21,7 +21,6 @@
 #include "gbeam2_interfaces/msg/poly_area.hpp"
 #include "gbeam2_interfaces/msg/graph.hpp"
 #include "gbeam2_interfaces/msg/status.hpp"
-#include "gbeam2_interfaces/msg/frontier_stamped.hpp"
 
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
@@ -39,8 +38,6 @@ public:
     {
         joint_line_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/status_visualization/joint_line", 1);
         joint_vectors_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/status_visualization/joint_vectors", 1);
-        frontier_line_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/status_visualization/frontier_lines",1);
-        frontier_point_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/status_visualization/frontiers_point", 1);
 
         status_sub_ = this->create_subscription<gbeam2_interfaces::msg::Status>(
             "/status", 1,
@@ -80,7 +77,6 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr joint_line_pub_; 
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr frontier_line_pub_; 
     rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
-    rclcpp::Subscription<gbeam2_interfaces::msg::FrontierStamped>::SharedPtr frontier_sub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr frontier_point_pub_;
 
     float scaling;
@@ -254,51 +250,9 @@ private:
                         joint_vector_markers.colors.push_back(normals_color);
                     }
                 }
-
-
-            
+   
         }
 
-
-        for(int z=0; z<curr_status[i].frontiers.size(); z++){
-            //add nodes and nodes normals
-            if(curr_status[i].frontiers[z].belong_to==i){
-                for (int n = 0; n < curr_status[i].frontiers[z].frontier.vertices_obstacles.size(); n++)
-            {
-                //if(curr_status[i].frontiers[z].shared_with == j){
-                    geometry_msgs::msg::Point32 point;
-                    point.x = curr_status[i].frontiers[z].frontier.vertices_obstacles[n].x;
-                    point.y = curr_status[i].frontiers[z].frontier.vertices_obstacles[n].y;
-                    point.z = curr_status[i].frontiers[z].frontier.vertices_obstacles[n].z;
-                    geometry_msgs::msg::Point p; p.x = point.x;p.y = point.y; p.z= point.z;
-                    frontier_lines.points.push_back(p);
-                    frontier_lines.colors.push_back((curr_status[i].frontiers[z].type==1) ? connected_lines_color: lines_color);
-                    node_points.points.push_back(point);
-                    robot_id.values.push_back(i);
-                    ObsORReach.values.push_back(1);
-                    frontier_id.values.push_back(curr_status[i].frontiers[z].id);
-                //} 
-
-            }
-            for (int n = 0; n < curr_status[i].frontiers[z].frontier.vertices_reachable.size(); n++)
-            {
-                //if(curr_status[i].frontiers[z].shared_with == j){
-                    geometry_msgs::msg::Point32 point;
-                    point.x = curr_status[i].frontiers[z].frontier.vertices_reachable[n].x;
-                    point.y = curr_status[i].frontiers[z].frontier.vertices_reachable[n].y;
-                    point.z = curr_status[i].frontiers[z].frontier.vertices_reachable[n].z;
-                    node_points.points.push_back(point);
-                    robot_id.values.push_back(i);
-                    ObsORReach.values.push_back(0); 
-                    frontier_id.values.push_back(curr_status[i].frontiers[z].id);
-                //}
-                
-
-            }
-            }
-            
-            
-        }
     }
 
     joint_vector_markers.header.frame_id = "world";
