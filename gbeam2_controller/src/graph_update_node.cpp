@@ -30,6 +30,7 @@
 #include "gbeam2_interfaces/msg/graph_edge.hpp"
 #include "gbeam2_interfaces/msg/poly_area.hpp"
 #include "gbeam2_interfaces/msg/graph.hpp"
+#include "gbeam2_interfaces/msg/graph_update.hpp"
 
 #include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
 #include "gbeam2_interfaces/msg/graph_cluster.hpp"
@@ -80,7 +81,7 @@ public:
         clusters_pub_ =this->create_publisher<gbeam2_interfaces::msg::GraphCluster>(
           "gbeam/clusters",1);
 
-        external_poly_sub_ = this->create_subscription<gbeam2_interfaces::msg::FreePolygonStamped>(
+        external_poly_sub_ = this->create_subscription<gbeam2_interfaces::msg::GraphUpdate>(
             "external_nodes", 1, std::bind(&GraphUpdateNode::extNodesCallback, this, std::placeholders::_1));
 
         batch_values_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("batch_values",1);
@@ -192,7 +193,7 @@ private:
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr graph_pub_;
     rclcpp::Publisher<gbeam2_interfaces::msg::GraphCluster>::SharedPtr clusters_pub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr poly_sub_;
-    rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr external_poly_sub_;
+    rclcpp::Subscription<gbeam2_interfaces::msg::GraphUpdate>::SharedPtr external_poly_sub_;
     rclcpp::Service<gbeam2_interfaces::srv::SetMappingStatus>::SharedPtr status_server_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr batch_values_pub_;
     std_msgs::msg::Float32MultiArray batch_values;
@@ -503,9 +504,9 @@ private:
 
     }
 
-    void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::FreePolygonStamped> received_nodes){
+    void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::GraphUpdate> ext_updates){
         // Each time i receive external nodes I store them 
-        external_nodes = *received_nodes;
+        external_nodes = ext_updates->poly_ext;
         received_ext_nodes = true;
     }
 
