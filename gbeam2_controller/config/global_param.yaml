@@ -14,7 +14,7 @@
 
 /**/poly_gen:
   ros__parameters:
-    update_freq: 5.0 # Hz     #2.0
+    update_freq: 2.0 # Hz     #2.0
     num_vertices: 6        # 6
     dist_step: 0.05  # m     #0.1
     start_dist: 0.15 #0.15  # m
