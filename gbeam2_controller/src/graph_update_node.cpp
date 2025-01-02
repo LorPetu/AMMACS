@@ -684,7 +684,7 @@ private:
             }
             // ################################################
 
-            if (vert_dist > node_dist_open && vert_ext_dist> 2*node_dist_open) // modified also this condition
+            if (vert_dist > node_dist_open && vert_ext_dist> 1.5*node_dist_open) // modified also this condition
             {
             vert.id = graph.nodes.size();
             vert.is_reachable = true;
@@ -703,7 +703,7 @@ private:
 
             is_changed = true;
             }
-            else if (vert_ext_dist< 2*node_dist_open)
+            else if (vert_ext_dist< 1.5*node_dist_open)
             {
                 RCLCPP_INFO(this->get_logger(),"INSIDE Vertex %d wasn't added due to conflict with external nodes",i);
             }
