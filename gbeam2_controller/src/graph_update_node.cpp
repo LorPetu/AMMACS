@@ -170,6 +170,7 @@ private:
     int name_space_id;
 
     gbeam2_interfaces::msg::FreePolygonStamped external_nodes;
+    std::vector<gbeam2_interfaces::msg::Bridge> external_bridges;
     std::vector<gbeam2_interfaces::msg::Bridge> candidates_bridges;
 
     gbeam2_interfaces::msg::Graph graph;
@@ -508,6 +509,7 @@ private:
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::GraphUpdate> ext_updates){
         // Each time i receive external nodes I store them 
         external_nodes = ext_updates->poly_ext;
+        external_bridges = ext_updates->bridges;
         received_ext_nodes = true;
     }
 
@@ -1334,6 +1336,7 @@ private:
 
             if(received_ext_nodes){
                 //Take all external bridges and check if there's any already existing 
+                RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_nodes.robot_id);
             }
 
             for (auto it = candidates_bridges.begin();it !=candidates_bridges.end();){
@@ -1362,10 +1365,8 @@ private:
                 // Send back updated bridges 
             }
             
-
-            
-
             Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
+            graph.cluster_graph = Graphclusters;
 
             ////printMatrix(this->get_logger(),updated_adj_matrix); //
             graph_pub_->publish(graph);

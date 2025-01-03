@@ -243,6 +243,7 @@ private:
             // Publish the fake polygon
             gbeam2_interfaces::msg::GraphUpdate updates;
             updates.poly_ext =fake_poly;
+            updates.bridges = request->update_request.cluster_graph.bridges;
             external_updates_pub_->publish(updates);
 
             // Wait for the update to be processed with a timeout
@@ -379,7 +380,7 @@ private:
         // Reserve space for potential changes (this is a rough estimate)
         result.nodes.reserve(current_graph->nodes.size() - last_node_index);
         result.edges.reserve(current_graph->edges.size() - last_edge_index);
-
+    
         // Check for modifications in existing NODES
         for (int i = 0; i < last_node_index; ++i) {
             if (hasVertexChanged(current_graph->nodes[i], previous_graph->nodes[i])) {
@@ -408,6 +409,7 @@ private:
             std::make_move_iterator(current_graph->edges.end())
         );
 
+        result.cluster_graph = current_graph->cluster_graph;
         result.adj_matrix = current_graph->adj_matrix;
         result.robot_id = current_graph->robot_id;
 

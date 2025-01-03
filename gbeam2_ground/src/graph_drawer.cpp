@@ -267,7 +267,7 @@ private:
     void ClusterCallback(const gbeam2_interfaces::msg::GraphCluster::SharedPtr cluster_graph_ptr) {
         double gain_scale = 0.005;
         double cluster_height = 5.0;
-        double min_cluster_size = 0.05;
+        double min_cluster_size = 0.08;
         std::string target_frame = name_space.substr(1, name_space.length() - 1) + "/odom"; // becasue lookupTransform doesn't allow "/" as first character
 
         visualization_msgs::msg::MarkerArray centroid_points;
@@ -307,7 +307,7 @@ private:
             marker.pose.position.z = cluster_height;
             marker.scale.x = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
             marker.scale.y = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
-            marker.scale.z = cluster.total_gain * gain_scale;
+            marker.scale.z = (cluster.total_gain * gain_scale< min_cluster_size) ? min_cluster_size : cluster.total_gain * gain_scale;
 
             marker.color = robot_color;
 
