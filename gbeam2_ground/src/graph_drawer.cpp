@@ -226,6 +226,20 @@ private:
             }
         }
 
+        for (auto& bridge : graph_ptr->cluster_graph.bridges){
+            if(bridge.belong_to==name_space_id){
+                gbeam2_interfaces::msg::Vertex centr_i = graph_ptr->nodes[bridge.v1];
+                gbeam2_interfaces::msg::Vertex centr_j;
+                centr_j.x = centr_i.x + bridge.length*bridge.direction.x;
+                centr_j.y = centr_i.y + bridge.length*bridge.direction.y;
+                edges_markers.points.push_back(vertex2point(centr_i));
+                edges_markers.points.push_back(vertex2point(centr_j));
+
+                edges_markers.colors.push_back(walkable_color);
+                edges_markers.colors.push_back(walkable_color);                
+            }
+        }
+
         edges_markers.header.frame_id = target_frame;
         nodes_normals.header.frame_id = target_frame;
         node_points_cloud.header.frame_id = target_frame; 
@@ -357,6 +371,8 @@ private:
                 }
             }
         }
+
+        
 
         // 
 

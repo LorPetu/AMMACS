@@ -616,8 +616,15 @@ private:
                 temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
                 temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
                 vert.gain=0;
-            
-                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = fake_graph.nodes[vert_ext_id].cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+                auto ext_vert =fake_graph.nodes[vert_ext_id];
+                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+
+                temp_bridge.direction.x = ext_vert.x - vert.x;
+                temp_bridge.direction.y = ext_vert.y - vert.y;
+                temp_bridge.direction.z = 0;
+                float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
+                temp_bridge.direction.x /= norm;
+                temp_bridge.direction.y /= norm;
                 candidates_bridges.push_back(temp_bridge);
               
 
@@ -729,7 +736,15 @@ private:
                 temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
                 vert.gain=0;
             
-                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = fake_graph.nodes[vert_ext_id].cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+                auto ext_vert =fake_graph.nodes[vert_ext_id];
+                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+
+                temp_bridge.direction.x = ext_vert.x - vert.x;
+                temp_bridge.direction.y = ext_vert.y - vert.y;
+                temp_bridge.direction.z = 0;
+                float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
+                temp_bridge.direction.x /= norm;
+                temp_bridge.direction.y /= norm;
                 candidates_bridges.push_back(temp_bridge);
               
 
