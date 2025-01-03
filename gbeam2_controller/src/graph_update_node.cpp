@@ -170,6 +170,7 @@ private:
     int name_space_id;
 
     gbeam2_interfaces::msg::FreePolygonStamped external_nodes;
+    std::vector<gbeam2_interfaces::msg::Bridge> candidates_bridges;
 
     gbeam2_interfaces::msg::Graph graph;
     std::vector<gbeam2_interfaces::msg::Vertex> new_reach_node;
@@ -531,11 +532,18 @@ private:
             //RCLCPP_INFO(this->get_logger(), "lookupTransform -------> %s to %s", target_frame.c_str(), source_frame.c_str());
             l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, poly_ptr->header.stamp); // we get tranformation in the future  tf2::TimePointZero
         } catch (const tf2::TransformException & ex) {
-            RCLCPP_WARN(
-                this->get_logger(), "GBEAM:graph_update:lookupTransform: Could not transform %s to %s: %s",
-                target_frame.c_str(), source_frame.c_str(), ex.what());
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            return;
+                try {
+            
+                //RCLCPP_INFO(this->get_logger(), "lookupTransform -------> %s to %s", target_frame.c_str(), source_frame.c_str());
+                    l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, tf2::TimePointZero); // we get tranformation in the future  tf2::TimePointZero
+                } catch (const tf2::TransformException & ex) {
+                    RCLCPP_WARN(
+                        this->get_logger(), "GBEAM:graph_update:lookupTransform: Could not transform %s to %s: %s",
+                        target_frame.c_str(), source_frame.c_str(), ex.what());
+                    //std::this_thread::sleep_for(std::chrono::seconds(1));
+                    return;
+                }
+            
         }
         gbeam2_interfaces::msg::Vertex position;
         position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
@@ -596,10 +604,27 @@ private:
                 vert.is_reachable = false;
                 vert.gain = 0;
             }
+
             addNode(graph,vert); //add vertex to the graph
+           
             
-            //if(vert_ext_dist<=2*node_dist_open && vert_ext_dist>node_dist_open) 
-            RCLCPP_INFO(this->get_logger(),"Added REACHABLE vertex %d with id: %d has node %d of robot%d %f distant", i, vert.id, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+            if(vert_ext_dist<=max_lenght_edge && fake_graph.nodes[vert_ext_id].cluster_id!=-1){ // Candidate bridge with external nodes
+                gbeam2_interfaces::msg::Bridge temp_bridge;
+                temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
+                temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
+                vert.gain=0;
+            
+                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = fake_graph.nodes[vert_ext_id].cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+                candidates_bridges.push_back(temp_bridge);
+              
+
+                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+            }
+
+           
+
             if(vert.is_reachable) new_reach_node.push_back(vert);
             
 
@@ -675,16 +700,15 @@ private:
                 auto temp_pair = vert_graph_distance_noobstacle(fake_graph, vert);
                 vert_ext_dist = temp_pair.first;
                 vert_ext_id = temp_pair.second;
-                RCLCPP_INFO(this->get_logger(),"My INSIDE vertex %d has node %d of robot%d %f distant", i, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+                //RCLCPP_INFO(this->get_logger(),"My INSIDE vertex %d has node %d of robot%d %f distant", i, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
 
             }
             else{
                 vert_ext_dist = INF;
-                RCLCPP_INFO(this->get_logger(),"external nodes comparing with INSIDE size zeroooo");
             }
             // ################################################
 
-            if (vert_dist > node_dist_open && vert_ext_dist> 1.5*node_dist_open) // modified also this condition
+            if (vert_dist > node_dist_open && vert_ext_dist> node_dist_open) // modified also this condition
             {
             vert.id = graph.nodes.size();
             vert.is_reachable = true;
@@ -696,16 +720,28 @@ private:
             }
             addNode(graph,vert); //add vertex to the graph
             
-            //if(vert_ext_dist<=2*node_dist_open && vert_ext_dist>node_dist_open) 
-            RCLCPP_INFO(this->get_logger(),"Added INSIDE vertex %d id: %d has node %d of robot%d %f distant", i, vert.id, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+            if(vert_ext_dist<=max_lenght_edge && fake_graph.nodes[vert_ext_id].cluster_id!=-1){ // Candidate bridge with external nodes
+                gbeam2_interfaces::msg::Bridge temp_bridge;
+                temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
+                temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
+                vert.gain=0;
+            
+                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = fake_graph.nodes[vert_ext_id].cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+                candidates_bridges.push_back(temp_bridge);
+              
+
+                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+            }
             if(vert.is_reachable) new_reach_node.push_back(vert);
             
 
             is_changed = true;
             }
-            else if (vert_ext_dist< 1.5*node_dist_open)
+            else if (vert_ext_dist< node_dist_open)
             {
-                RCLCPP_INFO(this->get_logger(),"INSIDE Vertex %d wasn't added due to conflict with external nodes",i);
+                //RCLCPP_INFO(this->get_logger(),"INSIDE Vertex %d wasn't added due to conflict with external nodes",i);
             }
             
         }
@@ -1296,15 +1332,41 @@ private:
                 }
             }
 
+            if(received_ext_nodes){
+                //Take all external bridges and check if there's any already existing 
+            }
+
+            for (auto it = candidates_bridges.begin();it !=candidates_bridges.end();){
+                if(graph.nodes[it->v1].cluster_id!=-1){
+                    it->c1 = graph.nodes[it->v1].cluster_id;
+                    // Check if walkable, if the two end are inside reachable polygon
+                    // Could be enough to check only external end?
+                    if(isInsideObstacles(poly_ptr->polygon,fake_graph.nodes[it->v2])){
+                                it->is_walkable = true;                                
+                                Graphclusters.bridges.push_back(*it);
+                                RCLCPP_INFO(this->get_logger(),"ADD BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            it->v1, it->c1, it->r1,
+                                                            it->v2, it->c2, it->r2, it->length);
+                                it = candidates_bridges.erase(it);
+                                } else{
+                                    it++;
+                                }
+                                                
+                } else{
+                    it++;
+                }
+                
+            }
+
+            if(received_ext_nodes){
+                // Send back updated bridges 
+            }
+            
+
             
 
             Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
 
-        
-
-
-
-        
             ////printMatrix(this->get_logger(),updated_adj_matrix); //
             graph_pub_->publish(graph);
             clusters_pub_->publish(Graphclusters);
