@@ -170,6 +170,9 @@ private:
     int name_space_id;
 
     gbeam2_interfaces::msg::FreePolygonStamped external_nodes;
+    std::vector<gbeam2_interfaces::msg::Bridge> external_bridges;
+    std::vector<gbeam2_interfaces::msg::Bridge> candidates_bridges;
+    int N_bridges=0;
 
     gbeam2_interfaces::msg::Graph graph;
     std::vector<gbeam2_interfaces::msg::Vertex> new_reach_node;
@@ -295,7 +298,7 @@ private:
         double k_cand =0.0; //sum of the weights of the links incident to node i, 
         double k_in_cand=0.0; //ki,in is the sum of the weights of the links from i to nodes in C
         
-        RCLCPP_INFO(this->get_logger(),"Computing Global Modularity....");
+        //RCLCPP_INFO(this->get_logger(),"Computing Global Modularity....");
         
         for(int cand_neigh=0;cand_neigh<weight_adj_matrix[candidate_node.cluster_id].size();cand_neigh++){
             if(cand_neigh==candidate_node.cluster_id || cand_neigh==cluster.cluster_id){
@@ -317,7 +320,7 @@ private:
 
         delta_mod = ((sum_in + 2.0 * k_in_cand) / (2.0 * m) - pow((sum_tot + k_cand) / (2.0 * m), 2)) - (sum_in / (2.0 * m) - pow(sum_tot / (2.0 * m), 2) - pow(k_cand / (2.0 * m), 2));
         
-        RCLCPP_INFO(this->get_logger(),"End Computing Global Modularity....");
+        //RCLCPP_INFO(this->get_logger(),"End Computing Global Modularity....");
 
         return delta_mod;  
     }
@@ -330,7 +333,7 @@ private:
         double k_in_cand=0.0; //ki,in is the sum of the weights of the links from i to nodes in C
         int candidate_id = candidate_node.cluster_id;
 
-        RCLCPP_INFO(this->get_logger(),"Computing Global Modularity 2....");
+        //RCLCPP_INFO(this->get_logger(),"Computing Global Modularity 2....");
 
         for (int node_id : cluster.nodes) {
             const auto& node = graph.nodes[node_id];
@@ -355,7 +358,7 @@ private:
 
         delta_mod = ((sum_in + 2.0 * k_in_cand) / (2.0 * m) - pow((sum_tot + k_cand) / (2.0 * m), 2)) - (sum_in / (2.0 * m) - pow(sum_tot / (2.0 * m), 2) - pow(k_cand / (2.0 * m), 2));
         
-        RCLCPP_INFO(this->get_logger(),"End Computing Global Modularity 2 ....");
+        //RCLCPP_INFO(this->get_logger(),"End Computing Global Modularity 2 ....");
 
         return delta_mod;  
     }
@@ -471,7 +474,7 @@ private:
     void mergeClusters(gbeam2_interfaces::msg::GraphClusterNode& blob, gbeam2_interfaces::msg::GraphClusterNode& host,std::vector<std::vector<float>>& cluster_adj_matrix){
         // Add cluster blob (and all of its nodes) to cluster host 
         if(blob.is_unmergeable){
-            RCLCPP_INFO(this->get_logger(),"Cluster %d CAN NOT BE merged into %d",blob.cluster_id,host.cluster_id);
+            //RCLCPP_INFO(this->get_logger(),"Cluster %d CAN NOT BE merged into %d",blob.cluster_id,host.cluster_id);
         }else{
             for(auto& node_id:blob.nodes){
                 host.nodes.push_back(node_id);
@@ -498,7 +501,7 @@ private:
                 
             }
 
-            RCLCPP_INFO(this->get_logger(),"Cluster %d is merged into %d",blob.cluster_id,host.cluster_id);
+            //RCLCPP_INFO(this->get_logger(),"Cluster %d is merged into %d",blob.cluster_id,host.cluster_id);
         }
 
 
@@ -506,7 +509,9 @@ private:
 
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::GraphUpdate> ext_updates){
         // Each time i receive external nodes I store them 
+        if(!mapping_status) mapping_status=true;
         external_nodes = ext_updates->poly_ext;
+        external_bridges = ext_updates->bridges;
         received_ext_nodes = true;
     }
 
@@ -529,13 +534,20 @@ private:
         try {
             
             //RCLCPP_INFO(this->get_logger(), "lookupTransform -------> %s to %s", target_frame.c_str(), source_frame.c_str());
-            l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, poly_ptr->header.stamp); //poly_ptr->header.stamp we get tranformation in the future
+            l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, poly_ptr->header.stamp); // we get tranformation in the future  tf2::TimePointZero
         } catch (const tf2::TransformException & ex) {
-            RCLCPP_WARN(
-                this->get_logger(), "GBEAM:graph_update:lookupTransform: Could not transform %s to %s: %s",
-                target_frame.c_str(), source_frame.c_str(), ex.what());
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            return;
+                try {
+            
+                //RCLCPP_INFO(this->get_logger(), "lookupTransform -------> %s to %s", target_frame.c_str(), source_frame.c_str());
+                    l2g_tf = tf_buffer_->lookupTransform(target_frame, source_frame, tf2::TimePointZero); // we get tranformation in the future  tf2::TimePointZero
+                } catch (const tf2::TransformException & ex) {
+                    RCLCPP_WARN(
+                        this->get_logger(), "GBEAM:graph_update:lookupTransform: Could not transform %s to %s: %s",
+                        target_frame.c_str(), source_frame.c_str(), ex.what());
+                    //std::this_thread::sleep_for(std::chrono::seconds(1));
+                    return;
+                }
+            
         }
         gbeam2_interfaces::msg::Vertex position;
         position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
@@ -551,6 +563,9 @@ private:
             graph.last_updater_id = name_space_id;
         }
 
+        gbeam2_interfaces::msg::Graph fake_graph;
+        fake_graph.nodes = external_nodes.polygon.vertices_reachable;
+
 
         // ####################################################
         // ####### ---------- ADD GRAPH NODES --------- #######
@@ -564,15 +579,19 @@ private:
             vert.cluster_id = -1;
             vert = vert_transform(vert, l2g_tf); //change coordinates to global position
 
-            float vert_dist = vert_graph_distance_noobstacle(graph, vert);
+            float vert_dist = vert_graph_distance_noobstacle(graph, vert).first;
             // vert = applyBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys);
 
             /// ####### NEW PART FOR COMMUNICATION ############
             float vert_ext_dist; 
-            if(received_ext_nodes && external_nodes.polygon.vertices_reachable.size()!=0){
-                gbeam2_interfaces::msg::Graph fake_graph;
-                fake_graph.nodes = external_nodes.polygon.vertices_reachable;
-                vert_ext_dist = vert_graph_distance_noobstacle(fake_graph, vert);
+            int vert_ext_id;
+            if(external_nodes.polygon.vertices_reachable.size()!=0){
+                
+                auto temp_pair = vert_graph_distance_noobstacle(fake_graph, vert);
+                vert_ext_dist = temp_pair.first;
+                vert_ext_id = temp_pair.second;
+                //RCLCPP_INFO(this->get_logger(),"My REACHABLE vertex %d has node %d of robot%d %f distant", i, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+
             }
             else{
                 vert_ext_dist = INF;
@@ -589,13 +608,42 @@ private:
                 vert.is_reachable = false;
                 vert.gain = 0;
             }
+
             addNode(graph,vert); //add vertex to the graph
+           
+            
+            if(vert_ext_dist<=max_lenght_edge && fake_graph.nodes[vert_ext_id].cluster_id!=-1){ // Candidate bridge with external nodes
+                gbeam2_interfaces::msg::Bridge temp_bridge;
+                temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
+                temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
+                vert.gain=0;
+                auto ext_vert =fake_graph.nodes[vert_ext_id];
+                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+
+                temp_bridge.direction.x = ext_vert.x - vert.x;
+                temp_bridge.direction.y = ext_vert.y - vert.y;
+                temp_bridge.direction.z = 0;
+                float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
+                temp_bridge.direction.x /= norm;
+                temp_bridge.direction.y /= norm;
+                candidates_bridges.push_back(temp_bridge);
+              
+
+                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+            }
+
+           
+
             if(vert.is_reachable) new_reach_node.push_back(vert);
+            
+
             is_changed = true;
             }
             else if (vert_ext_dist< node_dist_open)
             {
-                RCLCPP_INFO(this->get_logger(),"REACHABLE Vertex %d wasn't added due to conflict with external nodes",i);
+                //RCLCPP_INFO(this->get_logger(),"REACHABLE Vertex %d wasn't added due to conflict with external nodes",i);
             }
             
         }
@@ -653,15 +701,18 @@ private:
             vert.cluster_id = -1;
             vert = vert_transform(vert, l2g_tf); //change coordinates to global position
 
-            float vert_dist = vert_graph_distance_noobstacle(graph, vert);
+            float vert_dist = vert_graph_distance_noobstacle(graph, vert).first;
             // vert = applyBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys);
 
             /// ####### NEW PART FOR COMMUNICATION ############
             float vert_ext_dist; 
-            if(received_ext_nodes && external_nodes.polygon.inside_reachable.size()!=0){
-                gbeam2_interfaces::msg::Graph fake_graph;
-                fake_graph.nodes = external_nodes.polygon.inside_reachable;
-                vert_ext_dist = vert_graph_distance_noobstacle(fake_graph, vert);
+            int vert_ext_id;
+            if(external_nodes.polygon.vertices_reachable.size()!=0){ // Compare its own inside nodes with external one (only reacheable)
+                auto temp_pair = vert_graph_distance_noobstacle(fake_graph, vert);
+                vert_ext_dist = temp_pair.first;
+                vert_ext_id = temp_pair.second;
+                //RCLCPP_INFO(this->get_logger(),"My INSIDE vertex %d has node %d of robot%d %f distant", i, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+
             }
             else{
                 vert_ext_dist = INF;
@@ -679,12 +730,37 @@ private:
                 vert.gain = 0;
             }
             addNode(graph,vert); //add vertex to the graph
+            
+            if(vert_ext_dist<=max_lenght_edge && fake_graph.nodes[vert_ext_id].cluster_id!=-1){ // Candidate bridge with external nodes
+                gbeam2_interfaces::msg::Bridge temp_bridge;
+                temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
+                temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
+                vert.gain=0;
+            
+                auto ext_vert =fake_graph.nodes[vert_ext_id];
+                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+
+                temp_bridge.direction.x = ext_vert.x - vert.x;
+                temp_bridge.direction.y = ext_vert.y - vert.y;
+                temp_bridge.direction.z = 0;
+                float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
+                temp_bridge.direction.x /= norm;
+                temp_bridge.direction.y /= norm;
+                candidates_bridges.push_back(temp_bridge);
+              
+
+                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+            }
             if(vert.is_reachable) new_reach_node.push_back(vert);
+            
+
             is_changed = true;
             }
             else if (vert_ext_dist< node_dist_open)
             {
-                RCLCPP_INFO(this->get_logger(),"REACHABLE Vertex %d wasn't added due to conflict with external nodes",i);
+                //RCLCPP_INFO(this->get_logger(),"INSIDE Vertex %d wasn't added due to conflict with external nodes",i);
             }
             
         }
@@ -891,7 +967,7 @@ private:
                 node_to_coeff[new_node.id] = -1.0; 
                 auto new_cluster = createCluster(std::vector<gbeam2_interfaces::msg::Vertex>{graph.nodes[new_node.id]}, next_cluster_id,false);
                 louvain_Com.clusters.push_back(new_cluster);
-                RCLCPP_INFO(this->get_logger(), "Node %d initialized as a singleton cluster with ID %d. Coeff: %.6f", new_node.id, next_cluster_id, node_to_coeff[new_node.id]);
+                //RCLCPP_INFO(this->get_logger(), "Node %d initialized as a singleton cluster with ID %d. Coeff: %.6f", new_node.id, next_cluster_id, node_to_coeff[new_node.id]);
                 next_cluster_id++; // Increment for the next cluster
             }
             E_1=0;
@@ -913,17 +989,17 @@ private:
             {
                 tot_density_curr = 2.0*E_1/(V_1*(V_1-1)); // Current Edge density of the FIRST batch
 
-                RCLCPP_INFO(this->get_logger(), "Case: %d || current_density: %f V: %d E: %d  || delta: %f",cluster_state,tot_density_curr,V_1,E_1,abs(tot_density_curr - gamma_1)/gamma_1);
+                //RCLCPP_INFO(this->get_logger(), "Case: %d || current_density: %f V: %d E: %d  || delta: %f",cluster_state,tot_density_curr,V_1,E_1,abs(tot_density_curr - gamma_1)/gamma_1);
             }
             else{
-                RCLCPP_INFO(this->get_logger(), "Case: %d || I can't compute current_density V: %d E: %d ",cluster_state,V_1,E_1);
+                //RCLCPP_INFO(this->get_logger(), "Case: %d || I can't compute current_density V: %d E: %d ",cluster_state,V_1,E_1);
                 //break;
             }
 
             if(tot_density_curr!=0.0 && std::isnan(gamma_1)){
                 gamma_1 = tot_density_curr; 
                 // If i have already enough edge density, i have already a revelant batch
-                if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1>0.7) cluster_state=2;
+                if(avg_degree>min_avg_degree*0.75 && V_1 > N_vert_min && gamma_1>0.5) cluster_state=2;
             } else{
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=2;
             } 
@@ -1006,13 +1082,13 @@ private:
             // FIRST PHASE OF LOUVAIN ALGORITHM: COMMUNITY DETECTION
             while (mod_gain_increase && max_iterations < 4) {
                 mod_gain_increase = false; // Reset at the beginning of each iteration
-                RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm.", max_iterations + 1);
+                //RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm.", max_iterations + 1);
 
                 // Inside the iteration loop
                 for (int i = update_batch.size() - 1; i >= 0; i--) {
                     int candidate_id = update_batch[i];
                     gbeam2_interfaces::msg::Vertex candidate_node = graph.nodes[candidate_id];
-                    RCLCPP_INFO(this->get_logger(), "Processing node %d.", candidate_id);
+                    //RCLCPP_INFO(this->get_logger(), "Processing node %d.", candidate_id);
                     int best_cl_id=-1;
                     int old_cluster_id=-1;
                     // We iter between all the neighbours of the candidate node that are unclustered (So we're not considering the old ones) and upon that
@@ -1022,7 +1098,7 @@ private:
                             int found_cl_id = node_to_cluster[neigh_id];
                             double temp_gain = computeLocalModularityGain(candidate_node, louvain_Com.clusters[found_cl_id], node_to_cluster, weight_adj_matrix, m);
 
-                            RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
+                            //RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
 
                             if (temp_gain > 0.0 && temp_gain > node_to_coeff[candidate_id]) {
                                 node_to_coeff[candidate_id] = temp_gain;
@@ -1035,7 +1111,7 @@ private:
                     // After visiting all the neighbours, if a max gain is detected we add that node to the community
 
                     if(best_cl_id!=-1){
-                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, node_to_coeff[candidate_id], best_cl_id);
+                        //RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, node_to_coeff[candidate_id], best_cl_id);
                         // Add the node to the best community
                         old_cluster_id = node_to_cluster[candidate_id];
                         node_to_cluster[candidate_id] = best_cl_id;
@@ -1043,7 +1119,7 @@ private:
                         if (std::find(new_cluster_nodes.begin(), new_cluster_nodes.end(), candidate_id) == new_cluster_nodes.end()) {
                             new_cluster_nodes.push_back(candidate_id);
                             
-                            RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
+                            //RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
                         }
 
                         // Erase it from the old one 
@@ -1056,7 +1132,7 @@ private:
                 }
 
                 max_iterations++;
-                RCLCPP_INFO(this->get_logger(), "Iteration %d completed.", max_iterations);
+                //RCLCPP_INFO(this->get_logger(), "Iteration %d completed.", max_iterations);
                 
             }
 
@@ -1069,8 +1145,8 @@ private:
             for(auto& comm:louvain_Com.clusters){
                 for (auto& node_id:comm.nodes)
                 {
-                    RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
-                    RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
+                    //RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
+                    //RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
                 }
                 
                
@@ -1097,7 +1173,7 @@ private:
                     new_id++;
                     ++it; // Move to the next cluster
                 } else {
-                    RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
+                    //RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
                     it = louvain_Com.clusters.erase(it); // Erase and get the next iterator
                 }
             }
@@ -1108,8 +1184,8 @@ private:
             for(auto& comm:louvain_Com.clusters){
                 for (auto& node_id:comm.nodes)
                 {
-                    RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
-                    RCLCPP_INFO(this->get_logger(), "NEW MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
+                    //RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
+                    //RCLCPP_INFO(this->get_logger(), "NEW MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
                 }
                 
                
@@ -1143,7 +1219,7 @@ private:
 
                         // Increment the cluster adjacency matrix entry
                         cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
-                        RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d weight = %.6f", node_id,cl_i.cluster_id, neigh_id,neigh_cluster_id, 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length);
+                        //RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d weight = %.6f", node_id,cl_i.cluster_id, neigh_id,neigh_cluster_id, 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length);
 
                         
                     }
@@ -1160,30 +1236,30 @@ private:
 
             while (mod_gain_increase && max_iterations < 4) {
                 mod_gain_increase = false; // Reset at the beginning of each iteration
-                RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm PHASE 2.", max_iterations + 1);
+                //RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm PHASE 2.", max_iterations + 1);
 
                 // Inside the iteration loop starting from last added clusters
                 for (int i=Graphclusters.clusters.size()-1;i>=0;i--) {
                     int candidate_id = Graphclusters.clusters[i].cluster_id;
-                    RCLCPP_INFO(this->get_logger(), "Processing cluster node %d.", candidate_id);
+                    //RCLCPP_INFO(this->get_logger(), "Processing cluster node %d.", candidate_id);
                     int best_cl_id=-1;
                     int old_cluster_id=-1;
                     for (int neigh_id = 0; neigh_id < cluster_adj_matrix[candidate_id].size(); neigh_id++) {
                         double temp_gain;
                         if (cluster_adj_matrix[candidate_id][neigh_id] != 0.0 && candidate_id!=neigh_id) {
                             if(Graphclusters.clusters[i].nodes.size()<2){
-                                RCLCPP_INFO(this->get_logger(), "Cluster Node %d is a single node cluster and I could assign to %d", candidate_id, neigh_id);
+                                //RCLCPP_INFO(this->get_logger(), "Cluster Node %d is a single node cluster and I could assign to %d", candidate_id, neigh_id);
                                 mod_gain_increase = true; 
                                 best_cl_id = neigh_id;
                                 temp_gain = cluster_adj_matrix[candidate_id][neigh_id];
                             }else{
                                 temp_gain = computeGlobalModularityGain(Graphclusters.clusters[i], Graphclusters.clusters[neigh_id],cluster_adj_matrix, m);
-                                RCLCPP_INFO(this->get_logger(), "Cluster Node %d -> Cluster Neighbor %d: Local modularity gain = %.6f", candidate_id, neigh_id, temp_gain);
+                                //RCLCPP_INFO(this->get_logger(), "Cluster Node %d -> Cluster Neighbor %d: Local modularity gain = %.6f", candidate_id, neigh_id, temp_gain);
                             }
                             
 
                             if (temp_gain > 0.0 && temp_gain > ClusterNode_coeff[candidate_id]) {
-                                RCLCPP_INFO(this->get_logger(), "Got best comm for cluster node %d.", candidate_id);
+                                //RCLCPP_INFO(this->get_logger(), "Got best comm for cluster node %d.", candidate_id);
                                 ClusterNode_coeff[candidate_id] = temp_gain;
                                 mod_gain_increase = true; 
                                 best_cl_id = neigh_id; 
@@ -1194,23 +1270,23 @@ private:
                         }
                     }
                     
-                    RCLCPP_INFO(this->get_logger(), "Check for best comm for cluster node %d.", candidate_id);
+                    //RCLCPP_INFO(this->get_logger(), "Check for best comm for cluster node %d.", candidate_id);
 
                     if(best_cl_id!=-1){
-                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, ClusterNode_coeff[candidate_id], best_cl_id);
+                        //RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, ClusterNode_coeff[candidate_id], best_cl_id);
                         ClusterNode_to_comm[candidate_id] = best_cl_id;
                         // Move all the nodes of cluster to the best cluster
                         if(Graphclusters.clusters[i].nodes.size()<N_vert_min+1) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix); 
                     }
-                    RCLCPP_INFO(this->get_logger(), "END Processing cluster node %d.", candidate_id);
+                    //RCLCPP_INFO(this->get_logger(), "END Processing cluster node %d.", candidate_id);
                 }
 
                 max_iterations++;
-                RCLCPP_INFO(this->get_logger(), "Iteration %d completed.", max_iterations);
+                //RCLCPP_INFO(this->get_logger(), "Iteration %d completed.", max_iterations);
                 
             }            
 
-            RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
+            //RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
 
             tot_density_curr = 0.0;
             avg_degree=0.0;
@@ -1254,7 +1330,7 @@ private:
                     ++new_id;
                     ++it;
                 } else {
-                    RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
+                    //RCLCPP_INFO(this->get_logger(), "Removing empty cluster with ID %d.", it->cluster_id);
                     it = Graphclusters.clusters.erase(it); // Safely remove empty clusters
                 }
             }
@@ -1275,15 +1351,59 @@ private:
                 }
             }
 
+            // ####################################################
+            // ############## BRIDGES VALIDATION ##################
+            // ####################################################
+
+            if(received_ext_nodes){
+                //Take all external bridges and check if there's any already existing 
+                RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_nodes.robot_id);
+                for(auto& ext_bridge : external_bridges){
+                    if(ext_bridge.belong_to!=name_space_id){
+                        // Check if adding this bridge is needed
+                        bool is_present = false;
+                        for(auto& my_bridge : Graphclusters.bridges){
+                            if(my_bridge.id==ext_bridge.id && my_bridge.belong_to == ext_bridge.belong_to){
+                                is_present=true;
+                                break;
+                            };
+                        }
+
+                        if(!is_present){
+                            Graphclusters.bridges.push_back(ext_bridge);
+                        }
+                    }
+                }
+            }
+
+            for (auto it = candidates_bridges.begin();it !=candidates_bridges.end();){
+                if(graph.nodes[it->v1].cluster_id!=-1){
+                    it->c1 = graph.nodes[it->v1].cluster_id;
+                    // Check if walkable, if the two end are inside reachable polygon
+                    // Could be enough to check only external end?
+                    if(isInsideObstacles(poly_ptr->polygon,fake_graph.nodes[it->v2])&&
+                                isInsideObstacles(poly_ptr->polygon,graph.nodes[it->v1])){
+                                it->is_walkable = true; 
+                                it->id = N_bridges; N_bridges++;
+                                it->belong_to = name_space_id;                               
+                                Graphclusters.bridges.push_back(*it);
+                                RCLCPP_INFO(this->get_logger(),"ADD BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            it->v1, it->c1, it->r1,
+                                                            it->v2, it->c2, it->r2, it->length);
+                                it = candidates_bridges.erase(it);
+                                } else{
+                                    it++;
+                                }
+                                                
+                } else{
+                    it++;
+                }
+                
+            }
             
-
             Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
+            graph.cluster_graph = Graphclusters;
 
-        
-
-
-
-        
             ////printMatrix(this->get_logger(),updated_adj_matrix); //
             graph_pub_->publish(graph);
             clusters_pub_->publish(Graphclusters);

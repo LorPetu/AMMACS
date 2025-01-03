@@ -4,7 +4,7 @@
 
 /**:
   ros__parameters:
-      communication_range : 2.0
+      communication_range : 20.0
       N_robot: 2    
       elipse_scaling_obs: 0.6 ## Elipse is computed taking into account the distance between foci scaled by this parameter - between 2 obstacles in a frontier
       elipse_scaling_robot: 0.2 ## Elipse is computed taking into account the distance between foci scaled by this parameter - between 2 drones 

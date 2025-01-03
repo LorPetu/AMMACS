@@ -19,6 +19,7 @@
 #include "gbeam2_interfaces/msg/graph.hpp"
 #include "gbeam2_interfaces/msg/free_polygon.hpp"
 #include "gbeam2_interfaces/msg/free_polygon_stamped.hpp"
+#include "gbeam2_interfaces/msg/graph_update.hpp"
 
 #include "tf2/exceptions.h"
 #include "tf2_ros/buffer.h"
@@ -55,7 +56,7 @@ public:
     // PUBLISHING TOPICS
     merged_graph_pub_ = this->create_publisher<gbeam2_interfaces::msg::Graph>(
                 "gbeam/merged_graph", 1);
-    fake_poly_pub_ = this->create_publisher<gbeam2_interfaces::msg::FreePolygonStamped>(
+    external_updates_pub_ = this->create_publisher<gbeam2_interfaces::msg::GraphUpdate>(
                 "external_nodes", 1);
     timer_pub_ =this->create_publisher<std_msgs::msg::Float32MultiArray>(
                 "timers",1);
@@ -152,7 +153,7 @@ private:
 
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_subscriber_;
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr merged_graph_pub_;
-    rclcpp::Publisher<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr fake_poly_pub_;
+    rclcpp::Publisher<gbeam2_interfaces::msg::GraphUpdate>::SharedPtr external_updates_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr timer_pub_;
     rclcpp::Service<gbeam2_interfaces::srv::GraphUpdate>::SharedPtr  graph_updates_service_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr start_merger_service_;
@@ -216,12 +217,13 @@ private:
     void serverCallback(const std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Request> request,
                         std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Response> response)
     {   
-        if(start_merging){
+        if(start_merging){ //start_merging=true;
+
             int req_robot_id = request->update_request.robot_id;
             if(name_space_id==req_robot_id) return;
             std::unique_lock<std::mutex> lock(mutex_);
-            //RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Service call received from %d", name_space_id, req_robot_id);
-            //RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
+            RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Service call received from %d", name_space_id, req_robot_id);
+            RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
 
             std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character
             std::string source_frame = "robot"+ std::to_string(req_robot_id) + "/odom";
@@ -240,7 +242,10 @@ private:
             updateResponse.success = false;
             
             // Publish the fake polygon
-            fake_poly_pub_->publish(fake_poly);
+            gbeam2_interfaces::msg::GraphUpdate updates;
+            updates.poly_ext =fake_poly;
+            updates.bridges = request->update_request.cluster_graph.bridges;
+            external_updates_pub_->publish(updates);
 
             // Wait for the update to be processed with a timeout
             auto timeout = std::chrono::seconds(5); // Adjust the timeout as needed
@@ -314,7 +319,7 @@ private:
                 if(trigger_time> lb_time && trigger_time<up_time){
                     //send a request
 
-                    //RCLCPP_INFO(this->get_logger(),"CLIENT[%d]: Send a request to %ld ...",name_space_id,i);
+                    RCLCPP_INFO(this->get_logger(),"CLIENT[%d]: Send a request to %ld ...",name_space_id,i);
 
                     std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Request> request_ = std::make_shared<gbeam2_interfaces::srv::GraphUpdate::Request>();
 
@@ -343,7 +348,7 @@ private:
                     
                     std::future_status status = result_future.wait_for(2s);  // timeout to guarantee a graceful finish
                     if (status == std::future_status::ready) {
-                        //RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: Received response from %d",name_space_id,i);        
+                        RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: Received response from %d",name_space_id,i);        
                         timers_CLIENTS[i]->reset();
                     }
 
@@ -376,7 +381,7 @@ private:
         // Reserve space for potential changes (this is a rough estimate)
         result.nodes.reserve(current_graph->nodes.size() - last_node_index);
         result.edges.reserve(current_graph->edges.size() - last_edge_index);
-
+    
         // Check for modifications in existing NODES
         for (int i = 0; i < last_node_index; ++i) {
             if (hasVertexChanged(current_graph->nodes[i], previous_graph->nodes[i])) {
@@ -405,6 +410,7 @@ private:
             std::make_move_iterator(current_graph->edges.end())
         );
 
+        result.cluster_graph = current_graph->cluster_graph;
         result.adj_matrix = current_graph->adj_matrix;
         result.robot_id = current_graph->robot_id;
 

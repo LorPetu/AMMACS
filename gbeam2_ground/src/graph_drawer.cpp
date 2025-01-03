@@ -226,6 +226,20 @@ private:
             }
         }
 
+        for (auto& bridge : graph_ptr->cluster_graph.bridges){
+            if(bridge.belong_to==name_space_id){
+                gbeam2_interfaces::msg::Vertex centr_i = graph_ptr->nodes[bridge.v1];
+                gbeam2_interfaces::msg::Vertex centr_j;
+                centr_j.x = centr_i.x + bridge.length*bridge.direction.x;
+                centr_j.y = centr_i.y + bridge.length*bridge.direction.y;
+                edges_markers.points.push_back(vertex2point(centr_i));
+                edges_markers.points.push_back(vertex2point(centr_j));
+
+                edges_markers.colors.push_back(walkable_color);
+                edges_markers.colors.push_back(walkable_color);                
+            }
+        }
+
         edges_markers.header.frame_id = target_frame;
         nodes_normals.header.frame_id = target_frame;
         node_points_cloud.header.frame_id = target_frame; 
@@ -267,7 +281,7 @@ private:
     void ClusterCallback(const gbeam2_interfaces::msg::GraphCluster::SharedPtr cluster_graph_ptr) {
         double gain_scale = 0.005;
         double cluster_height = 5.0;
-        double min_cluster_size = 0.05;
+        double min_cluster_size = 0.08;
         std::string target_frame = name_space.substr(1, name_space.length() - 1) + "/odom"; // becasue lookupTransform doesn't allow "/" as first character
 
         visualization_msgs::msg::MarkerArray centroid_points;
@@ -307,7 +321,7 @@ private:
             marker.pose.position.z = cluster_height;
             marker.scale.x = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
             marker.scale.y = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
-            marker.scale.z = cluster.total_gain * gain_scale;
+            marker.scale.z = (cluster.total_gain * gain_scale< min_cluster_size) ? min_cluster_size : cluster.total_gain * gain_scale;
 
             marker.color = robot_color;
 
@@ -357,6 +371,8 @@ private:
                 }
             }
         }
+
+        
 
         // 
 
