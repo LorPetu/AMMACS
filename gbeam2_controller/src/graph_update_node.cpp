@@ -509,6 +509,7 @@ private:
 
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::GraphUpdate> ext_updates){
         // Each time i receive external nodes I store them 
+        if(!mapping_status) mapping_status=true;
         external_nodes = ext_updates->poly_ext;
         external_bridges = ext_updates->bridges;
         received_ext_nodes = true;
@@ -1380,7 +1381,8 @@ private:
                     it->c1 = graph.nodes[it->v1].cluster_id;
                     // Check if walkable, if the two end are inside reachable polygon
                     // Could be enough to check only external end?
-                    if(isInsideObstacles(poly_ptr->polygon,fake_graph.nodes[it->v2])){
+                    if(isInsideObstacles(poly_ptr->polygon,fake_graph.nodes[it->v2])&&
+                                isInsideObstacles(poly_ptr->polygon,graph.nodes[it->v1])){
                                 it->is_walkable = true; 
                                 it->id = N_bridges; N_bridges++;
                                 it->belong_to = name_space_id;                               

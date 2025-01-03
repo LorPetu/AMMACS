@@ -217,7 +217,8 @@ private:
     void serverCallback(const std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Request> request,
                         std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Response> response)
     {   
-        if(start_merging){
+        if(start_merging){ //start_merging=true;
+
             int req_robot_id = request->update_request.robot_id;
             if(name_space_id==req_robot_id) return;
             std::unique_lock<std::mutex> lock(mutex_);
