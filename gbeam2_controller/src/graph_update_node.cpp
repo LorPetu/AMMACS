@@ -172,6 +172,7 @@ private:
     gbeam2_interfaces::msg::FreePolygonStamped external_nodes;
     std::vector<gbeam2_interfaces::msg::Bridge> external_bridges;
     std::vector<gbeam2_interfaces::msg::Bridge> candidates_bridges;
+    int N_bridges=0;
 
     gbeam2_interfaces::msg::Graph graph;
     std::vector<gbeam2_interfaces::msg::Vertex> new_reach_node;
@@ -1334,9 +1335,29 @@ private:
                 }
             }
 
+            // ####################################################
+            // ############## BRIDGES VALIDATION ##################
+            // ####################################################
+
             if(received_ext_nodes){
                 //Take all external bridges and check if there's any already existing 
                 RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_nodes.robot_id);
+                for(auto& ext_bridge : external_bridges){
+                    if(ext_bridge.belong_to!=name_space_id){
+                        // Check if adding this bridge is needed
+                        bool is_present = false;
+                        for(auto& my_bridge : Graphclusters.bridges){
+                            if(my_bridge.id==ext_bridge.id && my_bridge.belong_to == ext_bridge.belong_to){
+                                is_present=true;
+                                break;
+                            };
+                        }
+
+                        if(!is_present){
+                            Graphclusters.bridges.push_back(ext_bridge);
+                        }
+                    }
+                }
             }
 
             for (auto it = candidates_bridges.begin();it !=candidates_bridges.end();){
@@ -1345,7 +1366,9 @@ private:
                     // Check if walkable, if the two end are inside reachable polygon
                     // Could be enough to check only external end?
                     if(isInsideObstacles(poly_ptr->polygon,fake_graph.nodes[it->v2])){
-                                it->is_walkable = true;                                
+                                it->is_walkable = true; 
+                                it->id = N_bridges; N_bridges++;
+                                it->belong_to = name_space_id;                               
                                 Graphclusters.bridges.push_back(*it);
                                 RCLCPP_INFO(this->get_logger(),"ADD BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
                                                             it->v1, it->c1, it->r1,
@@ -1359,10 +1382,6 @@ private:
                     it++;
                 }
                 
-            }
-
-            if(received_ext_nodes){
-                // Send back updated bridges 
             }
             
             Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
