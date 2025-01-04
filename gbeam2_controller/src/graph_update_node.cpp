@@ -627,6 +627,7 @@ private:
                 temp_bridge.direction.x /= norm;
                 temp_bridge.direction.y /= norm;
                 candidates_bridges.push_back(temp_bridge);
+                is_changed=true;
               
 
                 RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
@@ -747,6 +748,7 @@ private:
                 temp_bridge.direction.x /= norm;
                 temp_bridge.direction.y /= norm;
                 candidates_bridges.push_back(temp_bridge);
+                is_changed=true;
               
 
                 RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
