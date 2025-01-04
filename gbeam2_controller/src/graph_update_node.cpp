@@ -406,6 +406,7 @@ private:
             if(node_enum) graph.nodes[node.id].cluster_id =id;
             N++;
         }
+        new_cl.belong_to =name_space_id;
         return new_cl;
 
     }    
@@ -424,6 +425,7 @@ private:
             tot_gain+=graph.nodes[node_id].gain;
         }
         it.total_gain=tot_gain;
+        it.neighbours_centroids.clear();
 
         int count = it.nodes.size();
         
@@ -455,6 +457,7 @@ private:
             tot_gain+=graph.nodes[node_id].gain;
         }
         it->total_gain=tot_gain;
+        it->neighbours_centroids.clear();
 
         int count = it->nodes.size();
         
@@ -1349,6 +1352,11 @@ private:
                         int new_j = old_to_new_id[j];
                         updated_adj_matrix[new_i][new_j] = cluster_adj_matrix[i][j];
                         updated_adj_matrix[new_j][new_i] = cluster_adj_matrix[i][j];
+                        if(i!=j){
+                            Graphclusters.clusters[new_i].neighbours_centroids.push_back(new_j);
+                            Graphclusters.clusters[new_j].neighbours_centroids.push_back(new_i);
+                        }
+                        
                     }
                 }
             }

@@ -1,5 +1,6 @@
 gbeam2_interfaces/Vertex centroid
 int32 cluster_id
+int32 belong_to
 float32 total_gain
 int32[] nodes
 int32[] unexplored_nodes
