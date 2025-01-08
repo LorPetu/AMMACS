@@ -72,6 +72,7 @@ public:
     start_coop_service_ = this->create_service<std_srvs::srv::SetBool>(
         "start_coop",std::bind(&CooperationNode::startCooperation,this, std::placeholders::_1, std::placeholders::_2));
 
+    timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), std::bind(&CooperationNode::navigationCallback, this));
 
     //cluster_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&CooperationNode::CreateClusterGraph, this));
 
@@ -124,12 +125,14 @@ private:
   bool start_coop = false;
 
 
-  //Frontiers variables
+  //Navigation variables
+  int last_selected_cluster=-1;
  
 
 
   std::vector<gbeam2_interfaces::msg::Status> last_status;
   nav_msgs::msg::Odometry robot_odom_;
+  geometry_msgs::msg::PointStamped robot_pos;
 
 
   //adjacency matrix is related to that graph
@@ -145,6 +148,7 @@ private:
   rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
   rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr assigned_graph_pub_;
   rclcpp::Publisher<gbeam2_interfaces::msg::GraphCluster>::SharedPtr clusters_pub_;
+  rclcpp::TimerBase::SharedPtr timer_;
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  start_coop_service_;
 
@@ -209,6 +213,9 @@ private:
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom_ptr)
   {
       robot_odom_ = *odom_ptr;
+      robot_pos.point.x = robot_odom_.pose.pose.position.x;
+      robot_pos.point.y = robot_odom_.pose.pose.position.y;
+      robot_pos.point.z = robot_odom_.pose.pose.position.z;
       //RCLCPP_INFO(this->get_logger(),"odom received: x:%f y:%f",robot_odom_.pose.pose.position.x,robot_odom_.pose.pose.position.y);
   }
   
@@ -324,7 +331,7 @@ private:
       auto& cl_i = GlobalClusters.clusters[i];
       cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id] = i;
     }
-    for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
+    //for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
     
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
       auto& cl_i = GlobalClusters.clusters[i];
@@ -348,11 +355,136 @@ private:
       //belong_matrix[cluster_l2g_index[bridge.belong_to][bridge.c1]][cluster_l2g_index[bridge.belong_to][bridge.c2]] = bridge.belong_to;
     }
 
-    printMatrix(this->get_logger(),global_adj_matrix);
+    //printMatrix(this->get_logger(),global_adj_matrix);
 
     clusters_pub_->publish(GlobalClusters);
 
   }
+
+  gbeam2_interfaces::msg::Graph getAssignedGraph(const std::vector<gbeam2_interfaces::msg::GraphClusterNode> clusters){
+      gbeam2_interfaces::msg::Graph result;
+
+      // How to deal with edges? 
+      
+      for(auto& cl:clusters){
+
+      }
+  }
+
+  int getCurrentCluster(geometry_msgs::msg::PointStamped pos){
+    // Return the id which has the nearest centroid from the pos specified in input
+    double d_min=INF, d;
+    int id_min=-1, i=0;
+  
+    for(auto& cl:GlobalClusters.clusters){
+      d=dist(cl.centroid,pos);
+      if(d<d_min){
+        id_min=i;
+        d_min =d;
+      } 
+      RCLCPP_INFO(this->get_logger(),"cluster %d --> id: %d dist: %f",i,cl.cluster_id,d);
+      i++;
+    }
+
+    return id_min;
+  }
+
+  int getBestCluster(const int curr_cl_id){
+    // Get the best cluster to explored based on the one in which i am
+    // Here we should avoid to get access to occupied cluster from "status" topic
+
+    // Get current cluster of other robots
+
+    // Verify if it exists any unexplored nodes in the current cluster 
+
+    // If yes, verify if is there a better cluster to explore, based on average and total gain
+    // avoiding clusters occupied by other
+
+  }
+
+  void navigationCallback(){
+
+    // Exploration based on second level Map taking into account also clusters of others robot
+    bool AreaDivision_isrequired = false;
+
+    if(last_selected_cluster<0){
+      // Node is just started
+      if(!GlobalClusters.clusters.empty()){
+        if(!stored_Graph[name_space_id]->cluster_graph.clusters.empty()){
+
+          RCLCPP_INFO(this->get_logger()," I would select the first cluster among mine");
+          last_selected_cluster = 0;
+
+        }else{
+          // I have no cluster at all or I didn't already compute one
+          RCLCPP_INFO(this->get_logger(),"I have no cluster at all or I didn't already compute one");
+          if(stored_Graph[name_space_id]->nodes.size()>4){
+            RCLCPP_INFO(this->get_logger(),"I have some nodes but they don't compose a cluster yet");
+          }
+          else{
+            int curr_cl_id = getCurrentCluster(robot_pos);
+            if(curr_cl_id!=-1){
+              auto curr_cl = GlobalClusters.clusters[curr_cl_id];
+
+              RCLCPP_INFO(this->get_logger(),"I'm in global cluster %d --> id: %d belong to: %d",curr_cl_id,curr_cl.cluster_id,curr_cl.belong_to);
+              AreaDivision_isrequired=true;
+            }
+
+          }
+          
+        }
+
+      }else{
+        RCLCPP_WARN(this->get_logger(),"Can't select any cluster because there aren't any");
+      }     
+      
+
+      
+    }
+
+    if(last_selected_cluster>0 && !AreaDivision_isrequired){
+      //
+
+      auto curr_cl = GlobalClusters.clusters[last_selected_cluster];
+      int best_cl_id = getBestCluster(last_selected_cluster);
+
+      // is the current cluster the best? 
+      // BEST CLUSTER SEARCH 
+
+      if(last_selected_cluster!=best_cl_id){
+        auto best_cl = GlobalClusters.clusters[last_selected_cluster];
+        if(best_cl.belong_to!=name_space_id){
+          last_selected_cluster = best_cl_id;
+          AreaDivision_isrequired = true;
+          RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster].belong_to, last_selected_cluster);
+        }else{
+          RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster);
+        }
+      }else{
+        RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster);
+      }
+      
+      
+    }
+
+    // If the selected current belong to an other robot:
+    // PAIRWISE AREA DIVISION 
+    // Client and service call to be pairwise syncronized 
+
+    if(AreaDivision_isrequired){
+
+    }
+
+
+    
+
+    // Publish to status the current cluster
+
+    // Build a graph with only selected cluster and publish it to the explorer 
+
+  }
+
+
   
 
   
