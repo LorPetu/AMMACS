@@ -201,6 +201,9 @@ void shortestDistances(gbeam2_interfaces::msg::Graph graph, float dist[], int st
 // using Dijkstra algorithm
 std::vector<int> dijkstra(gbeam2_interfaces::msg::Graph graph, int s, int t);
 
+// using Dijkstra but exploit matrix adjacency
+std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t);
+
 // compute best path from s to t (if t<0 it is ignored)
 std::vector<int> bestPath(gbeam2_interfaces::msg::Graph graph, int s, int t);
 

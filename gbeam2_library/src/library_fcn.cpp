@@ -6,6 +6,8 @@
 #include "geometry_msgs/msg/vector3.h"
 #include "sensor_msgs/msg/point_cloud.h"
 #include <cmath>
+#include <queue>
+#include <vector>
 #include <limits>
 
 // infinite for raytracing
@@ -867,6 +869,56 @@ void shortestDistances(gbeam2_interfaces::msg::Graph graph, float dist[], int st
   }
 
   return;
+}
+
+std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
+{
+  int N = graph.nodes.size();
+  int E = graph.adj_matrix.size;
+  auto adjMatrix = graph.adj_matrix.data;
+
+  // Since we're considering only reachable node we skip the filtering part.
+
+  std::vector<double> dist(N, INF);
+  std::vector<int> parent(N, -1); // To store the shortest path tree
+  std::priority_queue<std::pair<double, int>, std::vector<std::pair<double, int>>, std::greater<>> pq;
+
+  dist[s] = 0;
+  pq.push({0, s});
+
+
+  while (!pq.empty()) {
+        auto [currentDist, u] = pq.top();
+        pq.pop();
+
+        // If the distance is already larger, skip
+        if (currentDist > dist[u]) continue;
+
+        // Explore neighbors
+        for (int v : graph.nodes[u].neighbors) {
+            double weight = adjMatrix[u*N + v]; // adj.data[i * N + j] = matrix[i][j];
+            if (weight > 0 && dist[u] + weight < dist[v]) {
+                dist[v] = dist[u] + weight;
+                parent[v] = u;
+                pq.push({dist[v], v});
+            }
+        }
+    }
+
+    std::vector<int> path;
+    for (int at = t; at != -1; at = parent[at]) {
+        path.push_back(at);
+    }
+    std::reverse(path.begin(), path.end()); // Reverse to get the path from source to target
+
+    // Check if the path starts with the source
+    if (!path.empty() && path[0] == s) {
+        return path;
+    }
+    return {}; // Return empty if there's no valid path
+
+
+    return path;
 }
 
 // compute shortest path in graph from start to end

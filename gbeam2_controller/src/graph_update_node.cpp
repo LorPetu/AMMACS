@@ -1088,9 +1088,9 @@ private:
 
             // Initialize singleton communities for the second batch
             // RCLCPP_INFO(this->get_logger(), "Initializing singleton communities...");
-            for (const auto& pair : node_to_cluster) {
-                RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
-            } 
+            // for (const auto& pair : node_to_cluster) {
+            //     RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
+            // } 
 
             // FIRST PHASE OF LOUVAIN ALGORITHM: COMMUNITY DETECTION
             while (mod_gain_increase && max_iterations < 10) {
@@ -1116,7 +1116,7 @@ private:
                                 node_to_coeff[candidate_id] = temp_gain;
                                 mod_gain_increase = true; 
                                 best_cl_id = found_cl_id;
-                                RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
+                                //RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
 
                             }
                         }
@@ -1125,7 +1125,7 @@ private:
                     // After visiting all the neighbours, if a max gain is detected we add that node to the community
 
                     if(best_cl_id!=-1){
-                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, node_to_coeff[candidate_id], best_cl_id);
+                        //RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, node_to_coeff[candidate_id], best_cl_id);
                         // Add the node to the best community
                         old_cluster_id = node_to_cluster[candidate_id];
                         node_to_cluster[candidate_id] = best_cl_id;
@@ -1133,7 +1133,7 @@ private:
                         if (std::find(new_cluster_nodes.begin(), new_cluster_nodes.end(), candidate_id) == new_cluster_nodes.end()) {
                             new_cluster_nodes.push_back(candidate_id);
                             
-                            RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
+                            //RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
                         }
 
                         // Erase it from the old one if best and the old doesn't correspond 
@@ -1156,15 +1156,15 @@ private:
                 RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
             }
 
-            for(auto& comm:louvain_Com.clusters){
-                for (auto& node_id:comm.nodes)
-                {
-                    RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
-                    RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
-                }
+            // for(auto& comm:louvain_Com.clusters){
+            //     for (auto& node_id:comm.nodes)
+            //     {
+            //         RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
+            //         RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
+            //     }
                 
                
-            }
+            // }
 
             // #####################################################
             // GLOBAL CLUSTERING including already existing clusters
@@ -1195,15 +1195,15 @@ private:
 
             cluster_adj_matrix= M;
             
-            for(auto& comm:louvain_Com.clusters){
-                for (auto& node_id:comm.nodes)
-                {
-                    //RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
-                    //RCLCPP_INFO(this->get_logger(), "NEW MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
-                }
+            // for(auto& comm:louvain_Com.clusters){
+            //     for (auto& node_id:comm.nodes)
+            //     {
+            //         //RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
+            //         //RCLCPP_INFO(this->get_logger(), "NEW MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
+            //     }
                 
                
-            }
+            // }
 
             // Inizialization: Readapt cluster mapping to describe global commmunities 
             // unclustered_nodes.clear();

@@ -165,19 +165,22 @@ private:
     RCLCPP_INFO(this->get_logger(), "Target node (best): %d", best_node);
 
     RCLCPP_INFO(this->get_logger(), "Computing path from %d to %d", last_target, best_node);
-    std::vector<int> path;
+    std::vector<int> path, path2;
     try {
-        path = dijkstra(graph, last_target, best_node);
+        //path = dijkstra(graph, last_target, best_node);
+        path = dijkstraWithAdj(graph, last_target, best_node);
+
     } catch (const std::exception& e) {
         RCLCPP_ERROR(this->get_logger(), "Error in dijkstra: %s", e.what());
         return;
     }
 
-    std::string path_str;
+    std::string path_str, path2_str;
     for (int node : path) {
         path_str += std::to_string(node) + "-";
     }
-    RCLCPP_INFO(this->get_logger(), "New path is: %s", path_str.c_str());
+
+    RCLCPP_INFO(this->get_logger(), "Path computed with adj is: %s", path2_str.c_str());
 
     if (path.size() > 1) {
         last_target = path[1];
