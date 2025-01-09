@@ -26,16 +26,16 @@ class StatusTXNode : public rclcpp::Node
 public:
   StatusTXNode() : Node("status_TX"){
 
+  // Get namespace
+  name_space = this->get_namespace();
+  name_space_id = name_space.back()- '0';
+
   //SUBSCRIBED TOPICS
   odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
             name_space+ "odom", 1, std::bind(&StatusTXNode::odomCallback, this, std::placeholders::_1));
 
   ref_pos_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
             name_space+"gbeam/gbeam_pos_ref", 1, std::bind(&StatusTXNode::refPosCallback, this, std::placeholders::_1));
-
-  // Get namespace
-  name_space = this->get_namespace();
-  name_space_id = name_space.back()- '0';
 
   std::string filter_string = "robot_id!=%0";          
   rclcpp::SubscriptionOptions options;

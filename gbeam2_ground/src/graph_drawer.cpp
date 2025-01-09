@@ -297,6 +297,8 @@ private:
         walkable_color.r = 1, walkable_color.g = 0.1, walkable_color.b = 0.8, walkable_color.a = 0.15;
 
         std_msgs::msg::ColorRGBA robot_color;
+        std_msgs::msg::ColorRGBA white;
+        robot_color.r = 0.0; robot_color.g = 0.0; robot_color.b = 0.0; robot_color.a = 1.0;
 
         // Assign a rainbow color to each marker
         float hue = 360.0f * (static_cast<float>(name_space_id) / static_cast<float>(N_robot)); // Normalize hue [0, 360]
@@ -323,7 +325,7 @@ private:
             marker.scale.y = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
             marker.scale.z = (cluster.total_gain * gain_scale< min_cluster_size) ? min_cluster_size : cluster.total_gain * gain_scale;
 
-            marker.color = robot_color;
+            marker.color = (cluster.unexplored_nodes.empty()) ? white : robot_color;
 
             
 

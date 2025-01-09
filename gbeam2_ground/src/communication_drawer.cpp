@@ -75,9 +75,9 @@ private:
 
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr joint_vectors_pub_; 
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr joint_line_pub_; 
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr frontier_line_pub_; 
+
     rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr frontier_point_pub_;
+
 
     float scaling;
     int N_robot;
@@ -193,16 +193,6 @@ private:
 
     std::string target_frame =  "robot0/odom"; //becasue lookupTransform doesn't allow "/" as first character
 
-    //initialize node_points for /graph_nodes
-    sensor_msgs::msg::PointCloud node_points;
-    visualization_msgs::msg::Marker frontier_lines;
-    frontier_lines.ns = "comm_drawer";
-    frontier_lines.id = 1;
-    frontier_lines.type = visualization_msgs::msg::Marker::LINE_LIST;
-    frontier_lines.scale.x = 0.02 * scaling;
-    sensor_msgs::msg::ChannelFloat32 ObsORReach;
-    sensor_msgs::msg::ChannelFloat32 robot_id;
-    sensor_msgs::msg::ChannelFloat32 frontier_id;
  
  
     for (int i = 0; i < N_robot; i++) {
@@ -257,20 +247,12 @@ private:
 
     joint_vector_markers.header.frame_id = "world";
     joint_line_markers.header.frame_id = "world";
-    frontier_lines.header.frame_id = "world";
-    node_points.header.frame_id = "world";
-
-    node_points.channels.push_back(ObsORReach);
-    node_points.channels.push_back(robot_id);
-    node_points.channels.push_back(frontier_id);
 
 
-    sensor_msgs::msg::PointCloud2 node_points_2 = pointCloudTOpointCloud2(node_points);
 
-    frontier_point_pub_->publish(node_points_2);
     joint_vectors_pub_->publish(joint_vector_markers);
     joint_line_pub_->publish(joint_line_markers);
-    frontier_line_pub_->publish(frontier_lines);
+    
 }
 
 
