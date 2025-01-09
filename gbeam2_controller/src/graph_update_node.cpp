@@ -776,15 +776,18 @@ private:
         int N = new_adj_matrix.size();
         double m = 0.0;
         std::vector<std::vector<float>> weight_adj_matrix(N, std::vector<float>(N, 0.0f));  // Initialize with zeros
+        std::vector<std::vector<float>> lenght_adj_matrix(N, std::vector<float>(N, 0.0f));  // Initialize with zeros
 
         for (int i = 0; i < N; ++i) {
             for (int j = i+1; j < N; ++j) {
                 int e_ij = new_adj_matrix[i][j];
                 if(e_ij!=-1){
                     weight_adj_matrix[i][j] = 1/graph.edges[e_ij].length;
+                    lenght_adj_matrix[i][j] = graph.edges[e_ij].length;
                 } 
                 else{
                     weight_adj_matrix[i][j] = 0.0;
+                    lenght_adj_matrix[i][j] = INF;
                 }
                 m+= weight_adj_matrix[i][j];
             }
@@ -837,6 +840,10 @@ private:
                     //update adjacency matrix
                     new_adj_matrix[inReachableId[i]][inReachableId[j]] = edge.id;
                     new_adj_matrix[inReachableId[j]][inReachableId[i]] = edge.id;
+                    weight_adj_matrix[inReachableId[i]][inReachableId[j]] = 1/edge.length;
+                    weight_adj_matrix[inReachableId[j]][inReachableId[i]] = 1/edge.length;
+                    lenght_adj_matrix[inReachableId[i]][inReachableId[j]] = edge.length;
+                    lenght_adj_matrix[inReachableId[j]][inReachableId[i]] = edge.length;
                     graph.nodes[inReachableId[i]].neighbors.push_back(node_j.id);
                     graph.nodes[inReachableId[j]].neighbors.push_back(node_i.id);
 
@@ -885,6 +892,7 @@ private:
         
 
         graph.adj_matrix=matrix2GraphAdj(new_adj_matrix);
+        graph.weight_matrix = matrix2GraphAdj(lenght_adj_matrix);
 
         // ####################################################
         // ####### --- UPDATE CONNECTIONS AND GAINS --- #######
@@ -1080,12 +1088,12 @@ private:
 
             // Initialize singleton communities for the second batch
             // RCLCPP_INFO(this->get_logger(), "Initializing singleton communities...");
-            // for (const auto& pair : node_to_cluster) {
-            //     RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
-            // } 
+            for (const auto& pair : node_to_cluster) {
+                RCLCPP_INFO(this->get_logger(), "Node %d is in cluster %d", pair.first, pair.second);
+            } 
 
             // FIRST PHASE OF LOUVAIN ALGORITHM: COMMUNITY DETECTION
-            while (mod_gain_increase && max_iterations < 4) {
+            while (mod_gain_increase && max_iterations < 10) {
                 mod_gain_increase = false; // Reset at the beginning of each iteration
                 //RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm.", max_iterations + 1);
 
@@ -1103,12 +1111,13 @@ private:
                             int found_cl_id = node_to_cluster[neigh_id];
                             double temp_gain = computeLocalModularityGain(candidate_node, louvain_Com.clusters[found_cl_id], node_to_cluster, weight_adj_matrix, m);
 
-                            //RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
 
                             if (temp_gain > 0.0 && temp_gain > node_to_coeff[candidate_id]) {
                                 node_to_coeff[candidate_id] = temp_gain;
                                 mod_gain_increase = true; 
                                 best_cl_id = found_cl_id;
+                                RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
+
                             }
                         }
                     }
@@ -1116,7 +1125,7 @@ private:
                     // After visiting all the neighbours, if a max gain is detected we add that node to the community
 
                     if(best_cl_id!=-1){
-                        //RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, node_to_coeff[candidate_id], best_cl_id);
+                        RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, node_to_coeff[candidate_id], best_cl_id);
                         // Add the node to the best community
                         old_cluster_id = node_to_cluster[candidate_id];
                         node_to_cluster[candidate_id] = best_cl_id;
@@ -1124,11 +1133,11 @@ private:
                         if (std::find(new_cluster_nodes.begin(), new_cluster_nodes.end(), candidate_id) == new_cluster_nodes.end()) {
                             new_cluster_nodes.push_back(candidate_id);
                             
-                            //RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
+                            RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
                         }
 
-                        // Erase it from the old one 
-                        if (old_cluster_id >= 0 ) { //&& old_cluster_id != best_cl_id
+                        // Erase it from the old one if best and the old doesn't correspond 
+                        if (old_cluster_id >= 0 && old_cluster_id != best_cl_id ) { //
                             auto& old_cluster_nodes = louvain_Com.clusters[old_cluster_id].nodes;
                             old_cluster_nodes.erase(std::remove(old_cluster_nodes.begin(), old_cluster_nodes.end(), candidate_id), old_cluster_nodes.end());
                         }
@@ -1141,7 +1150,7 @@ private:
                 
             }
 
-            if (max_iterations >= 50) {
+            if (max_iterations >= 10) {
                 RCLCPP_WARN(this->get_logger(), "Maximum iterations reached without convergence.");
             } else {
                 RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
@@ -1150,8 +1159,8 @@ private:
             for(auto& comm:louvain_Com.clusters){
                 for (auto& node_id:comm.nodes)
                 {
-                    //RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
-                    //RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
+                    RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
+                    RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
                 }
                 
                
