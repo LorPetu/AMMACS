@@ -204,6 +204,8 @@ std::vector<int> dijkstra(gbeam2_interfaces::msg::Graph graph, int s, int t);
 // using Dijkstra but exploit matrix adjacency
 std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t);
 
+//std::pair<std::vector<int>,double> dijkstraWithAdjandPath(gbeam2_interfaces::msg::GraphCluster graph, int s, int t);
+
 // compute best path from s to t (if t<0 it is ignored)
 std::vector<int> bestPath(gbeam2_interfaces::msg::Graph graph, int s, int t);
 

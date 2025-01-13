@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <queue>
 
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -68,6 +69,8 @@ public:
 
     clusters_pub_ =this->create_publisher<gbeam2_interfaces::msg::GraphCluster>(
           "coop/Globalclusters",1);
+    current_cluster_pub_ = this->create_publisher<gbeam2_interfaces::msg::GraphClusterNode>(
+      "current_cluster",1);
 
     start_coop_service_ = this->create_service<std_srvs::srv::SetBool>(
         "start_coop",std::bind(&CooperationNode::startCooperation,this, std::placeholders::_1, std::placeholders::_2));
@@ -126,7 +129,8 @@ private:
 
 
   //Navigation variables
-  int last_selected_cluster=-1;
+  int last_selected_cluster_id=-1;
+  gbeam2_interfaces::msg::GraphClusterNode last_selected_cluster;
  
 
 
@@ -148,6 +152,7 @@ private:
   rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
   rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr assigned_graph_pub_;
   rclcpp::Publisher<gbeam2_interfaces::msg::GraphCluster>::SharedPtr clusters_pub_;
+  rclcpp::Publisher<gbeam2_interfaces::msg::GraphClusterNode>::SharedPtr current_cluster_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  start_coop_service_;
@@ -355,7 +360,10 @@ private:
       //belong_matrix[cluster_l2g_index[bridge.belong_to][bridge.c1]][cluster_l2g_index[bridge.belong_to][bridge.c2]] = bridge.belong_to;
     }
 
-    //printMatrix(this->get_logger(),global_adj_matrix);
+    GlobalClusters.bridges = stored_Graph[req_robot_id]->cluster_graph.bridges;
+    GlobalClusters.adj_matr = matrix2GraphAdj(global_adj_matrix);
+
+    printMatrix(this->get_logger(),global_adj_matrix);
 
     clusters_pub_->publish(GlobalClusters);
 
@@ -389,9 +397,132 @@ private:
     return id_min;
   }
 
+  std::pair<std::vector<int>,double> dijkstraWithAdjandPath(gbeam2_interfaces::msg::GraphCluster graph, int s, int t)
+{
+  int N = graph.clusters.size();
+  int E = graph.adj_matr.size;
+  auto adjMatrix = graph.adj_matr.data;
+  //RCLCPP_INFO(this->get_logger(),"Size of adjacency matrix: %d",N);
+
+  // Since we're considering only reachable node we skip the filtering part.
+
+  std::vector<double> dist(N, INF);
+  std::vector<int> parent(N, -1); // To store the shortest path tree
+  std::priority_queue<std::pair<double, int>, std::vector<std::pair<double, int>>, std::greater<>> pq;
+
+  std::vector<int> path;
+
+  dist[s] = 0;
+  pq.push({0, s});
+
+  while (!pq.empty()) {
+        auto [currentDist, u] = pq.top();
+        pq.pop();
+
+        // If the distance is already larger, skip
+        if (currentDist > dist[u]) continue;
+        auto cl_u = graph.clusters[u];
+        // Explore neighbors
+        //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: Searching in neighbourhood");
+        for (int v=0; v<N;v++) {
+          if(u!=v && adjMatrix[u*N + v]!=-1.0){
+            //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: get access to neigh: %d of cluster %d", v,u);
+            auto cl_v = graph.clusters[v];
+            double weight; 
+            //RCLCPP_INFO(this->get_logger(),"DIJSKTRA:  %d belong to robot%d and %d belong to robot%d", v,cl_v.belong_to,u,cl_u.belong_to);
+            if(cl_u.belong_to==cl_v.belong_to){
+              
+              weight = adjMatrix[u*N + v]; // adj.data[i * N + j] = matrix[i][j];
+              RCLCPP_INFO(this->get_logger(),"DIJSKTRA: weight matrix i:%d j%d %f",u,v, weight);
+            }else{
+              // Get access to bridges
+              //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: bridges");
+              weight = graph.bridges[adjMatrix[u*N + v]].length;
+            }
+
+            if (weight > 0 && dist[u] + weight < dist[v]) {
+                dist[v] = dist[u] + weight;
+                parent[v] = u;
+                pq.push({dist[v], v});
+            }
+
+          }
+            
+        }
+    }
+
+    
+    for (int at = t; at != -1; at = parent[at]) {
+        path.push_back(at);
+    }
+    std::reverse(path.begin(), path.end()); // Reverse to get the path from source to target
+
+    // Check if the path starts with the source
+    if (!path.empty() && path[0] == s) {
+        return std::make_pair(path,dist[s]);
+    }
+    return {}; // Return empty if there's no valid path
+
+    return std::make_pair(path,dist[t]);
+}
+
   int getBestCluster(const int curr_cl_id){
     // Get the best cluster to explored based on the one in which i am
     // Here we should avoid to get access to occupied cluster from "status" topic
+    std::vector<int> occupied_clusters;
+    float exp_distance = 1.0;
+    double best_reward=-1.0;
+    int best_cluster_id=-1;
+    std::vector<int> best_path;
+    
+    
+
+    /*for(int z=0; z<N_robot;z++){
+      if(z!=name_space_id){
+        RCLCPP_INFO(this->get_logger(),"Cluster occupied by %d is local id:%d global id: %d",z,last_status[z].current_cluster.cluster_id,cluster_l2g_index[last_status[z].current_cluster.belong_to][last_status[z].current_cluster.cluster_id]);
+        occupied_clusters.push_back(cluster_l2g_index[last_status[z].current_cluster.belong_to][last_status[z].current_cluster.cluster_id]);
+        // What if i'm tryng to map an external cluster that I don't have?
+      }
+    }*/
+   RCLCPP_INFO(this->get_logger(),"Start searching for best cluster");
+
+   for(int i=0; i<GlobalClusters.clusters.size(); i++){
+      //      if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
+        //RCLCPP_INFO(this->get_logger(),"cluster: %d Start searching for best cluster",i);
+  
+        auto [path, distance] = (i!=last_selected_cluster_id) ? dijkstraWithAdjandPath(GlobalClusters,curr_cl_id,i):std::make_pair(std::vector<int>{last_selected_cluster_id}, 0.01);;
+        
+        
+        if(path.size()>0){
+          double reward_avg = (GlobalClusters.clusters[i].total_gain/GlobalClusters.clusters[i].unexplored_nodes.size()) / pow(distance,exp_distance);
+          RCLCPP_INFO(this->get_logger(),"CLUSTER: %d - average reward: %f - distance %f - total_gain: %f - number of unexplored nodes: %d",
+                                                    i, reward_avg,distance,GlobalClusters.clusters[i].total_gain,GlobalClusters.clusters[i].unexplored_nodes.size());
+          if(reward_avg>best_reward){
+            best_cluster_id = i;
+            best_path = path;
+            best_reward = reward_avg;
+            
+          }
+        }
+        
+      
+    }
+
+    RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: %d - average reward: %f - %d clusters away",best_cluster_id, best_reward, best_path.size());
+
+    std::string path_str;
+    for (int node : best_path) {
+        path_str += std::to_string(node) + "-";
+    }
+
+    RCLCPP_INFO(this->get_logger(), "BEST CLUSTER: Path computed with adj is: %s", path_str.c_str());
+
+
+    //   if(std::find(occupied_clusters.begin(),occupied_clusters.end(),i) != occupied_clusters.end()){
+    //     continue;
+    //   }else{
+    
+    // }
 
     // Get current cluster of other robots
 
@@ -400,20 +531,24 @@ private:
     // If yes, verify if is there a better cluster to explore, based on average and total gain
     // avoiding clusters occupied by other
 
+    return best_cluster_id;
+
   }
 
   void navigationCallback(){
-
     // Exploration based on second level Map taking into account also clusters of others robot
+    
     bool AreaDivision_isrequired = false;
 
-    if(last_selected_cluster<0){
+    if(last_selected_cluster_id<0){
       // Node is just started
       if(!GlobalClusters.clusters.empty()){
         if(!stored_Graph[name_space_id]->cluster_graph.clusters.empty()){
 
           RCLCPP_INFO(this->get_logger()," I would select the first cluster among mine");
-          last_selected_cluster = 0;
+          last_selected_cluster_id = cluster_l2g_index[name_space_id][0];
+          current_cluster_pub_->publish(GlobalClusters.clusters[last_selected_cluster_id]);
+          return;
 
         }else{
           // I have no cluster at all or I didn't already compute one
@@ -442,26 +577,29 @@ private:
       
     }
 
-    if(last_selected_cluster>0 && !AreaDivision_isrequired){
+    if(last_selected_cluster_id>=0 && !AreaDivision_isrequired){
       //
-
-      auto curr_cl = GlobalClusters.clusters[last_selected_cluster];
-      int best_cl_id = getBestCluster(last_selected_cluster);
+      // Get updated id of the last selected cluster, since it changes during local copy of the global map
+      last_selected_cluster_id = cluster_l2g_index[last_selected_cluster.belong_to][last_selected_cluster.cluster_id];
+      //int best_cl_id = last_selected_cluster_id;
+      int best_cl_id = getBestCluster(last_selected_cluster_id);
 
       // is the current cluster the best? 
       // BEST CLUSTER SEARCH 
-
-      if(last_selected_cluster!=best_cl_id){
-        auto best_cl = GlobalClusters.clusters[last_selected_cluster];
+      //RCLCPP_INFO(this->get_logger(),"exit from getBestCluster function");
+      if(last_selected_cluster_id!=best_cl_id){
+        RCLCPP_INFO(this->get_logger(),"last selected cluster: %d ",last_selected_cluster_id);
+        auto best_cl = GlobalClusters.clusters[last_selected_cluster_id];
+        //RCLCPP_INFO(this->get_logger(),"Global cluster array is ok:");
         if(best_cl.belong_to!=name_space_id){
-          last_selected_cluster = best_cl_id;
+          last_selected_cluster_id = best_cl_id;
           AreaDivision_isrequired = true;
-          RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster].belong_to, last_selected_cluster);
+          RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
         }else{
-          RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster);
+          RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
         }
       }else{
-        RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster);
+        RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster_id);
       }
       
       

@@ -871,6 +871,8 @@ void shortestDistances(gbeam2_interfaces::msg::Graph graph, float dist[], int st
   return;
 }
 
+
+
 std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
 {
   int N = graph.nodes.size();
