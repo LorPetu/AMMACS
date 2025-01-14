@@ -474,7 +474,7 @@ private:
 
     }
 
-    void mergeClusters(gbeam2_interfaces::msg::GraphClusterNode& blob, gbeam2_interfaces::msg::GraphClusterNode& host,std::vector<std::vector<float>>& cluster_adj_matrix){
+    void mergeClusters(gbeam2_interfaces::msg::GraphClusterNode& blob, gbeam2_interfaces::msg::GraphClusterNode& host,std::vector<std::vector<float>>& cluster_adj_matrix,std::vector<std::vector<float>>& avg_lenght_M,std::vector<std::vector<int>>& n_edges_M){
         // Add cluster blob (and all of its nodes) to cluster host 
         if(blob.is_unmergeable){
             //RCLCPP_INFO(this->get_logger(),"Cluster %d CAN NOT BE merged into %d",blob.cluster_id,host.cluster_id);
@@ -488,6 +488,12 @@ private:
             cluster_adj_matrix[host.cluster_id][host.cluster_id] += cluster_adj_matrix[blob.cluster_id][blob.cluster_id];
             cluster_adj_matrix[blob.cluster_id][blob.cluster_id] = 0.0;
 
+            //
+
+            
+
+            // HERE I SHOULD PUT THE AVERAGE COMPUTATION OF EDGE LENGTH BETWEEN CLUSTER
+
             //update matrix and weights
             for (int i = 0; i < cluster_adj_matrix.size(); i++)
             {
@@ -496,6 +502,23 @@ private:
                     if(i==blob.cluster_id){
                        cluster_adj_matrix[host.cluster_id][j] += cluster_adj_matrix[i][j];
                        cluster_adj_matrix[j][host.cluster_id] += cluster_adj_matrix[j][i];
+
+                       auto& n = n_edges_M[host.cluster_id][j];
+                       auto& m = n_edges_M[i][j];
+                       auto& avg_n = avg_lenght_M[host.cluster_id][j];
+                       auto& avg_m = avg_lenght_M[i][j];
+
+                        avg_n=(n*avg_n +m*avg_m)/(n+m);
+                        n=n+m;
+                        m=0;
+                        avg_m =0;
+
+                        //Symmetric change
+                       n_edges_M[j][host.cluster_id]=n;
+                       n_edges_M[j][i]=m;
+                       avg_lenght_M[j][host.cluster_id]=avg_n;
+                       avg_lenght_M[j][i]=avg_m;
+
 
                        cluster_adj_matrix[i][j]=0;
                        cluster_adj_matrix[j][i]=0;
@@ -794,7 +817,7 @@ private:
            
         }
         
-        //auto cl_adj_matrix = GraphAdj2matrix(clusters.adj_matr);
+        //auto cl_adj_matrix = GraphAdj2matrix(clusters.adj_matrix);
 
         // ####################################################
         // ####### ---------- ADD GRAPH EDGES --------- #######
@@ -892,7 +915,7 @@ private:
         
 
         graph.adj_matrix=matrix2GraphAdj(new_adj_matrix);
-        graph.weight_matrix = matrix2GraphAdj(lenght_adj_matrix);
+        graph.length_matrix = matrix2GraphAdj(lenght_adj_matrix);
 
         // ####################################################
         // ####### --- UPDATE CONNECTIONS AND GAINS --- #######
@@ -959,7 +982,10 @@ private:
         //V = graph.nodes.size();
         //E = graph.edges.size();
 
-        auto cluster_adj_matrix = GraphAdj2matrix(Graphclusters.adj_matr);
+        auto cluster_adj_matrix = GraphAdj2matrix(Graphclusters.adj_matrix);
+        std::vector<std::vector<int>> n_edges_matrix(cluster_adj_matrix.size(), std::vector<int>(cluster_adj_matrix.size(), 0));  // Initialize with zeros
+        std::vector<std::vector<float>> avg_lenght_matrix(cluster_adj_matrix.size(), std::vector<float>(cluster_adj_matrix.size(), 0.0f));  // Initialize with zeros
+        
 
         
         // Parameters
@@ -1019,6 +1045,8 @@ private:
 
             int N_clusters = cluster_adj_matrix.size();
             cluster_adj_matrix.assign(N_clusters, std::vector<float>(N_clusters, 0.0f)); 
+            avg_lenght_matrix.assign(N_clusters, std::vector<float>(N_clusters, 0.0f)); 
+            n_edges_matrix.assign(N_clusters,std::vector<int>(N_clusters, 0));
 
             for (auto& cl_i : Graphclusters.clusters) {
                 for (auto& node_id : cl_i.nodes) {
@@ -1027,7 +1055,13 @@ private:
                         // Determine the cluster ID of the neighbor node
                         int neigh_cluster_id = graph.nodes[neigh_id].cluster_id;  
                         if (neigh_cluster_id != -1) {
-                           cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                            cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                            auto& n = n_edges_matrix[cl_i.cluster_id][neigh_cluster_id];
+                            auto& avg = avg_lenght_matrix[cl_i.cluster_id][neigh_cluster_id];
+
+                            avg = (n!=0) ? avg + (graph.edges[new_adj_matrix[node_id][neigh_id]].length - avg)/n : graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                            n++;
+                           // HERE I SHOULD PUT THE AVERAGE COMPUTATION OF EDGE LENGTH BETWEEN CLUSTER
                         }
                         
                     }
@@ -1194,13 +1228,9 @@ private:
             std::vector<std::vector<float>> M(Graphclusters.clusters.size(), std::vector<float>(Graphclusters.clusters.size(), 0.0f));
 
             cluster_adj_matrix= M;
+            avg_lenght_matrix.assign(M.size(), std::vector<float>(M.size(), 0.0f)); 
+            n_edges_matrix.assign(M.size(),std::vector<int>(M.size(), 0));
             
-            // for(auto& comm:louvain_Com.clusters){
-            //     for (auto& node_id:comm.nodes)
-            //     {
-            //         //RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
-            //         //RCLCPP_INFO(this->get_logger(), "NEW MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
-            //     }
                 
                
             // }
@@ -1233,6 +1263,17 @@ private:
 
                         // Increment the cluster adjacency matrix entry
                         cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+
+                        // HERE I SHOULD PUT THE AVERAGE COMPUTATION OF EDGE LENGTH BETWEEN CLUSTER
+
+                        auto& n = n_edges_matrix[cl_i.cluster_id][neigh_cluster_id];
+                        auto& avg = avg_lenght_matrix[cl_i.cluster_id][neigh_cluster_id];
+
+                        avg = (n!=0) ? avg + (graph.edges[new_adj_matrix[node_id][neigh_id]].length - avg)/n : graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                        n++;
+
+                        
+
                         //RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d weight = %.6f", node_id,cl_i.cluster_id, neigh_id,neigh_cluster_id, 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length);
 
                         
@@ -1290,7 +1331,7 @@ private:
                         //RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, ClusterNode_coeff[candidate_id], best_cl_id);
                         ClusterNode_to_comm[candidate_id] = best_cl_id;
                         // Move all the nodes of cluster to the best cluster
-                        if(Graphclusters.clusters[i].nodes.size()<N_vert_min+1) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix); 
+                        if(Graphclusters.clusters[i].nodes.size()<N_vert_min+1) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix,avg_lenght_matrix,n_edges_matrix); 
                     }
                     //RCLCPP_INFO(this->get_logger(), "END Processing cluster node %d.", candidate_id);
                 }
@@ -1352,6 +1393,7 @@ private:
             // Resize the cluster adjacency matrix
             int new_size = new_id; // Total number of clusters after cleanup
             std::vector<std::vector<float>> updated_adj_matrix(new_size, std::vector<float>(new_size, 0.0));
+            std::vector<std::vector<float>> updated_avg_lenght_matrix(new_size, std::vector<float>(new_size, 0.0));
 
             // Rebuild the adjacency matrix using the updated cluster IDs
             for (int i = 0; i < cluster_adj_matrix.size(); ++i) {
@@ -1360,7 +1402,9 @@ private:
                         int new_i = old_to_new_id[i];
                         int new_j = old_to_new_id[j];
                         updated_adj_matrix[new_i][new_j] = cluster_adj_matrix[i][j];
-                        updated_adj_matrix[new_j][new_i] = cluster_adj_matrix[i][j];
+                        updated_adj_matrix[new_j][new_i] = updated_adj_matrix[new_i][new_j];
+                        updated_avg_lenght_matrix[new_i][new_j] = avg_lenght_matrix[i][j]; 
+                        updated_avg_lenght_matrix[new_j][new_i] = updated_avg_lenght_matrix[new_i][new_j];
                         if(i!=j){
                             Graphclusters.clusters[new_i].neighbours_centroids.push_back(new_j);
                             Graphclusters.clusters[new_j].neighbours_centroids.push_back(new_i);
@@ -1420,12 +1464,14 @@ private:
                 
             }
             
-            Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
+            Graphclusters.adj_matrix=matrix2GraphAdj(updated_adj_matrix);
+            Graphclusters.length_matrix=matrix2GraphAdj(updated_avg_lenght_matrix);
+            printMatrix(this->get_logger(),avg_lenght_matrix);
             graph.cluster_graph = Graphclusters;
 
             ////printMatrix(this->get_logger(),updated_adj_matrix); //
             graph_pub_->publish(graph);
-            clusters_pub_->publish(Graphclusters);
+            //clusters_pub_->publish(Graphclusters);
         }    
         if(is_changed && received_ext_nodes)   received_ext_nodes = false;
     

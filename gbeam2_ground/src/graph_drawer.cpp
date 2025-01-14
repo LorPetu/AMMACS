@@ -356,7 +356,7 @@ private:
         }
 
         // Process adjacency matrix and edges
-        auto adj_matrix = GraphAdj2matrix(cluster_graph_ptr->adj_matr);
+        auto adj_matrix = GraphAdj2matrix(cluster_graph_ptr->adj_matrix);
 
         for (int i = 0; i < adj_matrix.size(); i++) {
             for (int j = i + 1; j < adj_matrix.size(); j++) {

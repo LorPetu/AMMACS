@@ -342,26 +342,30 @@ private:
       auto& cl_i = GlobalClusters.clusters[i];
       int N = stored_Graph[cl_i.belong_to]->cluster_graph.clusters.size();
 
-      // adj.data[i * N + j] = matrix[i][j]; matrix[i][j] = adj.data[i * N + j];
-      for(auto neigh_id:cl_i.neighbours_centroids){
-        auto el = stored_Graph[cl_i.belong_to]->cluster_graph.adj_matr.data[i*N + neigh_id];
-        global_adj_matrix[i][cluster_l2g_index[cl_i.belong_to][neigh_id]] = (el!=0.0) ? el: -1.0;
-               
-        belong_matrix[i][cluster_l2g_index[cl_i.belong_to][neigh_id]] = cl_i.belong_to;    
+      for(int j=i+1;j<GlobalClusters.clusters.size(); j++){
+        auto& cl_j = GlobalClusters.clusters[j];
+        if(cl_i.belong_to==cl_j.belong_to){
+          auto el = stored_Graph[cl_i.belong_to]->cluster_graph.length_matrix.data[i*N + j];
+          global_adj_matrix[i][j] = (el!=0.0) ? el: -1.0;
+          global_adj_matrix[j][i] = global_adj_matrix[i][j];
+          //belong_matrix[i][cluster_l2g_index[cl_i.belong_to][neigh_id]] = cl_i.belong_to;    
+        }else{
+          // Bridges
+        }
       }
-
     }
+
 
     //printMatrix(this->get_logger(),global_adj_matrix);
 
     for(auto& bridge : stored_Graph[req_robot_id]->cluster_graph.bridges){
-      global_adj_matrix[cluster_l2g_index[bridge.r1][bridge.c1]][cluster_l2g_index[bridge.r2][bridge.c2]] = bridge.id;
-      global_adj_matrix[cluster_l2g_index[bridge.r2][bridge.c2]][cluster_l2g_index[bridge.r1][bridge.c1]] = bridge.id;
+      global_adj_matrix[cluster_l2g_index[bridge.r1][bridge.c1]][cluster_l2g_index[bridge.r2][bridge.c2]] = bridge.length;
+      global_adj_matrix[cluster_l2g_index[bridge.r2][bridge.c2]][cluster_l2g_index[bridge.r1][bridge.c1]] = bridge.length;
       //belong_matrix[cluster_l2g_index[bridge.belong_to][bridge.c1]][cluster_l2g_index[bridge.belong_to][bridge.c2]] = bridge.belong_to;
     }
 
     GlobalClusters.bridges = stored_Graph[req_robot_id]->cluster_graph.bridges;
-    GlobalClusters.adj_matr = matrix2GraphAdj(global_adj_matrix);
+    GlobalClusters.adj_matrix = matrix2GraphAdj(global_adj_matrix);
 
     printMatrix(this->get_logger(),global_adj_matrix);
 
@@ -400,8 +404,8 @@ private:
   std::pair<std::vector<int>,double> dijkstraWithAdjandPath(gbeam2_interfaces::msg::GraphCluster graph, int s, int t)
 {
   int N = graph.clusters.size();
-  int E = graph.adj_matr.size;
-  auto adjMatrix = graph.adj_matr.data;
+  int E = graph.adj_matrix.size;
+  auto adjMatrix = graph.adj_matrix.data;
   //RCLCPP_INFO(this->get_logger(),"Size of adjacency matrix: %d",N);
 
   // Since we're considering only reachable node we skip the filtering part.
@@ -433,7 +437,7 @@ private:
             if(cl_u.belong_to==cl_v.belong_to){
               
               weight = adjMatrix[u*N + v]; // adj.data[i * N + j] = matrix[i][j];
-              RCLCPP_INFO(this->get_logger(),"DIJSKTRA: weight matrix i:%d j%d %f",u,v, weight);
+              //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: weight matrix i:%d j%d %f",u,v, weight);
             }else{
               // Get access to bridges
               //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: bridges");
@@ -459,7 +463,7 @@ private:
 
     // Check if the path starts with the source
     if (!path.empty() && path[0] == s) {
-        return std::make_pair(path,dist[s]);
+        return std::make_pair(path,dist[t]);
     }
     return {}; // Return empty if there's no valid path
 
@@ -547,7 +551,8 @@ private:
 
           RCLCPP_INFO(this->get_logger()," I would select the first cluster among mine");
           last_selected_cluster_id = cluster_l2g_index[name_space_id][0];
-          current_cluster_pub_->publish(GlobalClusters.clusters[last_selected_cluster_id]);
+          last_selected_cluster = GlobalClusters.clusters[last_selected_cluster_id];
+          current_cluster_pub_->publish(last_selected_cluster);
           return;
 
         }else{
