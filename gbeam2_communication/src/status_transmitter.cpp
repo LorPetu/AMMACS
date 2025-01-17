@@ -39,7 +39,7 @@ public:
 
   
   current_cluster_sub = this->create_subscription<gbeam2_interfaces::msg::GraphClusterNode>(
-      "current_cluster",1 ,std::bind(&StatusTXNode::currentClusterCallback, this, std::placeholders::_1));
+      "coop/current_cluster",1 ,std::bind(&StatusTXNode::currentClusterCallback, this, std::placeholders::_1));
 
   
 

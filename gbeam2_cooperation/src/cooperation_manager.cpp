@@ -70,7 +70,7 @@ public:
     clusters_pub_ =this->create_publisher<gbeam2_interfaces::msg::GraphCluster>(
           "coop/Globalclusters",1);
     current_cluster_pub_ = this->create_publisher<gbeam2_interfaces::msg::GraphClusterNode>(
-      "current_cluster",1);
+      "coop/current_cluster",1);
 
     start_coop_service_ = this->create_service<std_srvs::srv::SetBool>(
         "start_coop",std::bind(&CooperationNode::startCooperation,this, std::placeholders::_1, std::placeholders::_2));
@@ -280,6 +280,8 @@ private:
     last_updated_edge = (stored_Graph[req_robot_id]->edges.empty()) ? -1 : stored_Graph[req_robot_id]->edges.back().id;
 
     stored_Graph[req_robot_id]->cluster_graph = graph_received->cluster_graph;
+    stored_Graph[req_robot_id]->adj_matrix = graph_received->adj_matrix;
+    stored_Graph[req_robot_id]->length_matrix = graph_received->length_matrix;
   
     // Update node and edges for each graph update received
     for(gbeam2_interfaces::msg::Vertex node: graph_received->nodes){
@@ -379,8 +381,16 @@ private:
       // How to deal with edges? 
       
       for(auto& cl:clusters){
-
+        result.cluster_graph.clusters.push_back(cl);
+        for(auto& node_id:cl.nodes){
+          result.nodes.push_back(stored_Graph[cl.belong_to]->nodes[node_id]);
+        }
       }
+
+      result.adj_matrix = stored_Graph[name_space_id]->adj_matrix;
+      result.length_matrix = stored_Graph[name_space_id]->length_matrix;
+
+      return result;
   }
 
   int getCurrentCluster(geometry_msgs::msg::PointStamped pos){
@@ -470,7 +480,7 @@ private:
     return std::make_pair(path,dist[t]);
 }
 
-  int getBestCluster(const int curr_cl_id){
+  std::pair<int, std::vector<int>> getBestCluster(const int curr_cl_id){
     // Get the best cluster to explored based on the one in which i am
     // Here we should avoid to get access to occupied cluster from "status" topic
     std::vector<int> occupied_clusters;
@@ -494,7 +504,7 @@ private:
       //      if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
         //RCLCPP_INFO(this->get_logger(),"cluster: %d Start searching for best cluster",i);
   
-        auto [path, distance] = (i!=last_selected_cluster_id) ? dijkstraWithAdjandPath(GlobalClusters,curr_cl_id,i):std::make_pair(std::vector<int>{last_selected_cluster_id}, 0.01);;
+        auto [path, distance] = (i!=last_selected_cluster_id) ? dijkstraWithAdjandPath(GlobalClusters,curr_cl_id,i):std::make_pair(std::vector<int>{last_selected_cluster_id}, 0.1);;
         
         
         if(path.size()>0){
@@ -535,12 +545,14 @@ private:
     // If yes, verify if is there a better cluster to explore, based on average and total gain
     // avoiding clusters occupied by other
 
-    return best_cluster_id;
+    return std::make_pair(best_cluster_id, best_path);
 
   }
 
   void navigationCallback(){
     // Exploration based on second level Map taking into account also clusters of others robot
+
+    std::vector<gbeam2_interfaces::msg::GraphClusterNode> clusters_to_send;
     
     bool AreaDivision_isrequired = false;
 
@@ -587,7 +599,11 @@ private:
       // Get updated id of the last selected cluster, since it changes during local copy of the global map
       last_selected_cluster_id = cluster_l2g_index[last_selected_cluster.belong_to][last_selected_cluster.cluster_id];
       //int best_cl_id = last_selected_cluster_id;
-      int best_cl_id = getBestCluster(last_selected_cluster_id);
+      auto [best_cl_id,best_path] = getBestCluster(last_selected_cluster_id);
+
+      for(auto step : best_path){
+        clusters_to_send.push_back(GlobalClusters.clusters[step]);
+      }
 
       // is the current cluster the best? 
       // BEST CLUSTER SEARCH 
@@ -595,12 +611,14 @@ private:
       if(last_selected_cluster_id!=best_cl_id){
         RCLCPP_INFO(this->get_logger(),"last selected cluster: %d ",last_selected_cluster_id);
         auto best_cl = GlobalClusters.clusters[last_selected_cluster_id];
+        last_selected_cluster_id = best_cl_id;
         //RCLCPP_INFO(this->get_logger(),"Global cluster array is ok:");
         if(best_cl.belong_to!=name_space_id){
-          last_selected_cluster_id = best_cl_id;
+          
           AreaDivision_isrequired = true;
           RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
         }else{
+          
           RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
         }
       }else{
@@ -619,12 +637,17 @@ private:
     }
 
 
-    
+    //
+
+
+
 
     // Publish to status the current cluster
+    current_cluster_pub_->publish(last_selected_cluster);
 
     // Build a graph with only selected cluster and publish it to the explorer 
-
+    
+    assigned_graph_pub_->publish(getAssignedGraph(clusters_to_send));
   }
 
 

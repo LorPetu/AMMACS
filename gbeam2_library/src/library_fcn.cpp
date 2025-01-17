@@ -871,6 +871,43 @@ void shortestDistances(gbeam2_interfaces::msg::Graph graph, float dist[], int st
   return;
 }
 
+void shortestDistancesWithAdjMatrix(gbeam2_interfaces::msg::Graph graph, float dist[], int start) {
+    int N = graph.nodes.size();
+    auto adjMatrix = graph.adj_matrix.data; // Assuming row-major adjacency matrix
+    bool Q_set[N];
+    int prev[N];
+
+    // Initialize distances and visited sets
+    for (int i = 0; i < N; i++) {
+        dist[i] = INF;
+        prev[i] = -1;
+        Q_set[i] = graph.nodes[i].is_reachable; // Add to Q_set only if node is reachable
+    }
+
+    dist[start] = 0;
+
+    // Main Dijkstra loop
+    for (int count = 0; count < N; count++) {
+        int u = iMinCon(dist, Q_set, N); // Select the node with the shortest distance
+        if (u == -1) break;             // If no valid node is found, terminate early
+
+        Q_set[u] = false; // Remove selected node from Q_set
+
+        // Explore neighbors via adjacency matrix
+        for (int v = 0; v < N; v++) {
+            float weight = adjMatrix[u * N + v]; // Access weight of edge u -> v
+            if (Q_set[v] && weight > 0 && dist[v] > dist[u] + weight) {
+                dist[v] = dist[u] + weight; // Update shortest distance
+                prev[v] = u;               // Update predecessor
+            }
+        }
+    }
+
+    // `dist` now contains the shortest distances from `start` to all nodes
+    // `prev` contains the shortest path tree (predecessors for path reconstruction)
+}
+
+
 
 
 std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)

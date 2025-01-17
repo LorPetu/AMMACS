@@ -1038,7 +1038,7 @@ private:
             if(tot_density_curr!=0.0 && std::isnan(gamma_1)){
                 gamma_1 = tot_density_curr; 
                 // If i have already enough edge density, i have already a revelant batch
-                if(avg_degree>min_avg_degree*0.75 && V_1 > N_vert_min && gamma_1>0.5) cluster_state=2;
+                if(avg_degree>min_avg_degree*0.5 && V_1 > N_vert_min && gamma_1>gamma_min*0.5) cluster_state=2;
             } else{
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=2;
             } 
@@ -1444,8 +1444,8 @@ private:
                     it->c1 = graph.nodes[it->v1].cluster_id;
                     // Check if walkable, if the two end are inside reachable polygon
                     // Could be enough to check only external end?
-                    if(isInsideObstacles(poly_ptr->polygon,fake_graph.nodes[it->v2])&&
-                                isInsideObstacles(poly_ptr->polygon,graph.nodes[it->v1])){
+                    if(isInsideReachable(poly_ptr->polygon,fake_graph.nodes[it->v2])&&
+                                isInsideReachable(poly_ptr->polygon,graph.nodes[it->v1])){
                                 it->is_walkable = true; 
                                 it->id = N_bridges; N_bridges++;
                                 it->belong_to = name_space_id;                               
@@ -1471,7 +1471,7 @@ private:
 
             ////printMatrix(this->get_logger(),updated_adj_matrix); //
             graph_pub_->publish(graph);
-            //clusters_pub_->publish(Graphclusters);
+            clusters_pub_->publish(Graphclusters);
         }    
         if(is_changed && received_ext_nodes)   received_ext_nodes = false;
     

@@ -197,6 +197,8 @@ int iMaxCon(float arr[], bool con[], int size);
 //compute distances matrices of graph
 void shortestDistances(gbeam2_interfaces::msg::Graph graph, float dist[], int start);
 
+void shortestDistancesWithAdjMatrix(gbeam2_interfaces::msg::Graph graph, float dist[], int start);
+
 // compute shortest path in graph from start to end
 // using Dijkstra algorithm
 std::vector<int> dijkstra(gbeam2_interfaces::msg::Graph graph, int s, int t);

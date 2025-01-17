@@ -47,6 +47,8 @@ public:
         graph_subscriber_ = this->create_subscription<gbeam2_interfaces::msg::Graph>(
             "gbeam/reachability_graph", 1, std::bind(&ExplorationNode::graphCallback, this, std::placeholders::_1));
 
+        //"coop/assigned_graph"   OR "gbeam/reachability_graph" 
+
         pos_ref_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
             "gbeam/gbeam_pos_ref", 1);
     
@@ -140,7 +142,8 @@ private:
     std::vector<float> dist(N, std::numeric_limits<float>::max());
 
     try {
-        shortestDistances(graph, dist.data(), last_target);
+        //shortestDistances(graph, dist.data(), last_target);
+        shortestDistancesWithAdjMatrix(graph, dist.data(), last_target);
     } catch (const std::exception& e) {
         RCLCPP_ERROR(this->get_logger(), "Error in shortestDistances: %s", e.what());
         return;
@@ -162,10 +165,10 @@ private:
         }
     }
 
-    RCLCPP_INFO(this->get_logger(), "Target node (best): %d", best_node);
+    RCLCPP_INFO(this->get_logger(), "Target %d node (best): %d", best_node, graph.nodes[best_node].id);
 
     RCLCPP_INFO(this->get_logger(), "Computing path from %d to %d", last_target, best_node);
-    std::vector<int> path, path2;
+    std::vector<int> path;
     try {
         //path = dijkstra(graph, last_target, best_node);
         path = dijkstraWithAdj(graph, last_target, best_node);
@@ -175,12 +178,12 @@ private:
         return;
     }
 
-    std::string path_str, path2_str;
+    std::string path_str;
     for (int node : path) {
         path_str += std::to_string(node) + "-";
     }
 
-    RCLCPP_INFO(this->get_logger(), "Path computed with adj is: %s", path2_str.c_str());
+    RCLCPP_INFO(this->get_logger(), "Path computed with adj is: %s", path_str.c_str());
 
     if (path.size() > 1) {
         last_target = path[1];
