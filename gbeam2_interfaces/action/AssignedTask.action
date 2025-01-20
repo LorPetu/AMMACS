@@ -1,7 +1,8 @@
 # Request
 gbeam2_interfaces/Graph     assigned_graph
 int64                       cluster_id_task
-int64                         belong_to
+int64                       belong_to
+bool                        has_target_bridge
 gbeam2_interfaces/Bridge    target_bridge
 ---
 # Result

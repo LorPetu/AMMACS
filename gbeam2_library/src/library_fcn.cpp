@@ -872,6 +872,8 @@ void shortestDistances(gbeam2_interfaces::msg::Graph graph, float dist[], int st
 }
 
 void shortestDistancesWithAdjMatrix(gbeam2_interfaces::msg::Graph graph, float dist[], int start) {
+    // This function is used in a context in which node id doesn't correspond to the index postion of
+    // graph.nodes array. And also the adjacency matrix should be used with id and not the index
     int N = graph.nodes.size();
     auto adjMatrix = graph.adj_matrix.data; // Assuming row-major adjacency matrix
     bool Q_set[N];
@@ -894,8 +896,10 @@ void shortestDistancesWithAdjMatrix(gbeam2_interfaces::msg::Graph graph, float d
         Q_set[u] = false; // Remove selected node from Q_set
 
         // Explore neighbors via adjacency matrix
+        int u_id = graph.nodes[u].id;
         for (int v = 0; v < N; v++) {
-            float weight = adjMatrix[u * N + v]; // Access weight of edge u -> v
+          int v_id = graph.nodes[u].id;
+          float weight = adjMatrix[u_id * N + v_id]; // Access weight of edge u -> v
             if (Q_set[v] && weight > 0 && dist[v] > dist[u] + weight) {
                 dist[v] = dist[u] + weight; // Update shortest distance
                 prev[v] = u;               // Update predecessor
@@ -910,55 +914,58 @@ void shortestDistancesWithAdjMatrix(gbeam2_interfaces::msg::Graph graph, float d
 
 
 
-std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
-{
-  int N = graph.nodes.size();
-  int E = graph.adj_matrix.size;
-  auto adjMatrix = graph.adj_matrix.data;
+// std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
+// {
+//   int N = graph.nodes.size();
+//   int E = graph.adj_matrix.size;
+//   auto adjMatrix = graph.adj_matrix.data;
 
-  // Since we're considering only reachable node we skip the filtering part.
+//   // Since we're considering only reachable node we skip the filtering part.
 
-  std::vector<double> dist(N, INF);
-  std::vector<int> parent(N, -1); // To store the shortest path tree
-  std::priority_queue<std::pair<double, int>, std::vector<std::pair<double, int>>, std::greater<>> pq;
+//   std::vector<double> dist(N, INF);
+//   std::vector<int> parent(N, -1); // To store the shortest path tree
+//   std::priority_queue<std::pair<double, int>, std::vector<std::pair<double, int>>, std::greater<>> pq;
 
-  dist[s] = 0;
-  pq.push({0, s});
-
-
-  while (!pq.empty()) {
-        auto [currentDist, u] = pq.top();
-        pq.pop();
-
-        // If the distance is already larger, skip
-        if (currentDist > dist[u]) continue;
-
-        // Explore neighbors
-        for (int v : graph.nodes[u].neighbors) {
-            double weight = adjMatrix[u*N + v]; // adj.data[i * N + j] = matrix[i][j];
-            if (weight > 0 && dist[u] + weight < dist[v]) {
-                dist[v] = dist[u] + weight;
-                parent[v] = u;
-                pq.push({dist[v], v});
-            }
-        }
-    }
-
-    std::vector<int> path;
-    for (int at = t; at != -1; at = parent[at]) {
-        path.push_back(at);
-    }
-    std::reverse(path.begin(), path.end()); // Reverse to get the path from source to target
-
-    // Check if the path starts with the source
-    if (!path.empty() && path[0] == s) {
-        return path;
-    }
-    return {}; // Return empty if there's no valid path
+//   dist[s] = 0;
+//   pq.push({0, s});
 
 
-    return path;
-}
+//   while (!pq.empty()) {
+//         auto [currentDist, u] = pq.top();
+//         pq.pop();
+
+//         // If the distance is already larger, skip
+//         if (currentDist > dist[u]) continue;
+
+//         int u_id = graph.nodes[u].id;
+
+//         // Explore neighbors
+//         for (int v = 0; v < N; v++) {
+//           int v_id = graph.nodes[v].id;
+//             double weight = adjMatrix[u_id*N + v_id]; // adj.data[i * N + j] = matrix[i][j];
+//             if (weight > 0 && dist[u] + weight < dist[v]) {
+//                 dist[v] = dist[u] + weight;
+//                 parent[v] = u;
+//                 pq.push({dist[v], v});
+//             }
+//         }
+//     }
+
+//     std::vector<int> path;
+//     for (int at = t; at != -1; at = parent[at]) {
+//         path.push_back(at);
+//     }
+//     std::reverse(path.begin(), path.end()); // Reverse to get the path from source to target
+
+//     // Check if the path starts with the source
+//     if (!path.empty() && path[0] == s) {
+//         return path;
+//     }
+//     return {}; // Return empty if there's no valid path
+
+
+//     return path;
+// }
 
 // compute shortest path in graph from start to end
 // using Dijkstra algorithm

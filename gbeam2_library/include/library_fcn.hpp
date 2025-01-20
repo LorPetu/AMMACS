@@ -204,7 +204,7 @@ void shortestDistancesWithAdjMatrix(gbeam2_interfaces::msg::Graph graph, float d
 std::vector<int> dijkstra(gbeam2_interfaces::msg::Graph graph, int s, int t);
 
 // using Dijkstra but exploit matrix adjacency
-std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t);
+// std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t);
 
 //std::pair<std::vector<int>,double> dijkstraWithAdjandPath(gbeam2_interfaces::msg::GraphCluster graph, int s, int t);
 

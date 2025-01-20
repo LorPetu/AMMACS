@@ -1466,7 +1466,7 @@ private:
             
             Graphclusters.adj_matrix=matrix2GraphAdj(updated_adj_matrix);
             Graphclusters.length_matrix=matrix2GraphAdj(updated_avg_lenght_matrix);
-            printMatrix(this->get_logger(),avg_lenght_matrix);
+            //printMatrix(this->get_logger(),avg_lenght_matrix);
             graph.cluster_graph = Graphclusters;
 
             ////printMatrix(this->get_logger(),updated_adj_matrix); //

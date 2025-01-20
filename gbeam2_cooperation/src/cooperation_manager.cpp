@@ -12,6 +12,7 @@
 #include <string>
 #include <queue>
 #include <thread>
+#include <optional>
 
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -167,6 +168,7 @@ private:
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  start_coop_service_;
   rclcpp_action::Client<Task>::SharedPtr action_client_;
+  rclcpp_action::ClientGoalHandle<Task>::SharedPtr current_goal_handle_;
 
   //rclcpp::TimerBase::SharedPtr cluster_timer_;
 
@@ -392,7 +394,7 @@ private:
     GlobalClusters.bridges = stored_Graph[req_robot_id]->cluster_graph.bridges;
     GlobalClusters.adj_matrix = matrix2GraphAdj(global_adj_matrix);
 
-    printMatrix(this->get_logger(),global_adj_matrix);
+    //printMatrix(this->get_logger(),global_adj_matrix);
 
     clusters_pub_->publish(GlobalClusters);
 
@@ -412,6 +414,7 @@ private:
 
       result.adj_matrix = stored_Graph[name_space_id]->adj_matrix;
       result.length_matrix = stored_Graph[name_space_id]->length_matrix;
+      result.robot_id = clusters[0].belong_to;
 
       return result;
   }
@@ -587,6 +590,12 @@ private:
           RCLCPP_INFO(this->get_logger()," I would select the first cluster among mine");
           last_selected_cluster_id = cluster_l2g_index[name_space_id][0];
           last_selected_cluster = GlobalClusters.clusters[last_selected_cluster_id];
+          clusters_to_send.push_back(last_selected_cluster);
+          
+          // Send GOAL
+          send_goal(getAssignedGraph(clusters_to_send),last_selected_cluster,false);
+
+
           current_cluster_pub_->publish(last_selected_cluster);
           return;
 
@@ -640,12 +649,13 @@ private:
           
           AreaDivision_isrequired = true;
           RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
-        }else{
-          
+        }else{          
           RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
+          send_goal(getAssignedGraph(clusters_to_send),last_selected_cluster,false);
         }
       }else{
         RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster_id);
+        send_goal(getAssignedGraph(clusters_to_send),last_selected_cluster,false);
       }
       
       
@@ -670,13 +680,13 @@ private:
 
     // Build a graph with only selected cluster and publish it to the explorer 
     
-    assigned_graph_pub_->publish(getAssignedGraph(clusters_to_send));
+    //assigned_graph_pub_->publish(getAssignedGraph(clusters_to_send));
   }
 
   // Action routines
 
-  void goal_response_callback(const rclcpp_action::ClientGoalHandle<Task>::SharedPtr &goal_handle){
-
+  void goal_response_callback(const rclcpp_action::ClientGoalHandle<Task>::SharedPtr &goal_handle)
+  {
       if (!goal_handle)
       {
           RCLCPP_ERROR(this->get_logger(), "Goal was rejected by the server");
@@ -688,7 +698,7 @@ private:
   }
 
   void feedback_callback(rclcpp_action::ClientGoalHandle<Task>::SharedPtr, const std::shared_ptr<const Task::Feedback> feedback){
-      RCLCPP_INFO(this->get_logger(), "Received feedback: progress = %f", feedback->curr_vert.gain);
+      RCLCPP_INFO(this->get_logger(), "Current node visited id: %d with cluster_id: %d", feedback->curr_vert.id,feedback->curr_vert.cluster_id);
   }
 
   void result_callback(const rclcpp_action::ClientGoalHandle<Task>::WrappedResult &result){
@@ -708,9 +718,12 @@ private:
           RCLCPP_ERROR(this->get_logger(), "Unknown result code");
           break;
       }
+
+       // Reset current goal handle after result
+        current_goal_handle_.reset();
   }
 
-  void send_goal(){
+  void send_goal(gbeam2_interfaces::msg::Graph assigned_graph, gbeam2_interfaces::msg::GraphClusterNode cluster_task, const bool has_bridge, const gbeam2_interfaces::msg::Bridge &bridge = gbeam2_interfaces::msg::Bridge()){
 
     if (!action_client_->wait_for_action_server(std::chrono::seconds(5)))
     {
@@ -718,9 +731,26 @@ private:
         return;
     }
 
+    // Check if a goal is currently executing
+    if (current_goal_handle_)
+    {
+      auto status = current_goal_handle_->get_status();
+      if (status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
+          status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
+      {
+          RCLCPP_WARN(this->get_logger(), "A goal is already executing. Not sending a new goal.");
+          return;
+      }
+    }
+      
     // Create a goal message
     auto goal_msg = Task::Goal();
-    goal_msg.cluster_id_task = 1; // Example goal data
+    goal_msg.cluster_id_task = cluster_task.cluster_id;
+    goal_msg.belong_to = cluster_task.belong_to; // Example goal data
+    goal_msg.assigned_graph = assigned_graph;
+    goal_msg.has_target_bridge =has_bridge;
+    
+    if(has_bridge) goal_msg.target_bridge = bridge;
 
     RCLCPP_INFO(this->get_logger(), "Sending goal to cluster ID: %d", goal_msg.cluster_id_task);
 
@@ -733,6 +763,7 @@ private:
     send_goal_options.result_callback =
         std::bind(&CooperationNode::result_callback, this, std::placeholders::_1);
 
+    // Send the goal asynchronously
     action_client_->async_send_goal(goal_msg, send_goal_options);
   }
 
