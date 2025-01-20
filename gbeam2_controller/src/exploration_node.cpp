@@ -2,12 +2,14 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/node.hpp"
 #include "rclcpp/node_options.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
 
 #include <math.h>
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 
 
 
@@ -22,12 +24,14 @@
 #include "tf2_ros/buffer.h"
 #include "tf2/exceptions.h"
 
+
 #include "gbeam2_interfaces/msg/vertex.hpp"
 #include "gbeam2_interfaces/msg/graph_edge.hpp"
 #include "gbeam2_interfaces/msg/poly_area.hpp"
 #include "gbeam2_interfaces/msg/graph.hpp"
 
 #include "gbeam2_interfaces/srv/set_mapping_status.hpp"
+#include "gbeam2_interfaces/action/assigned_task.hpp"
 
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
@@ -41,7 +45,9 @@
 class ExplorationNode : public rclcpp::Node
 {
 public:
-    ExplorationNode() : Node("graph_expl")
+    
+    using Task = gbeam2_interfaces::action::AssignedTask;
+    explicit ExplorationNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions()) : Node("graph_expl",options)
     {   
         name_space = this->get_namespace();
         graph_subscriber_ = this->create_subscription<gbeam2_interfaces::msg::Graph>(
@@ -87,11 +93,24 @@ public:
       //---------------------------------------------
     
         timer_ = this->create_wall_timer(std::chrono::milliseconds(20), std::bind(&ExplorationNode::explorationCallback, this));
+        using namespace std::placeholders;
+
+        action_server_ = rclcpp_action::create_server<Task>(
+            this,
+            "Task", // Action name
+            std::bind(&ExplorationNode::handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&ExplorationNode::handle_cancel, this, std::placeholders::_1),
+            std::bind(&ExplorationNode::handle_accepted, this, std::placeholders::_1)
+        );
+
     }
 
     
     
 private:
+
+    
+
     double distance_exp;
     double reached_tol;
     double limit_xi, limit_xs, limit_yi, limit_ys;
@@ -107,10 +126,74 @@ private:
     
     gbeam2_interfaces::msg::Graph graph;
     gbeam2_interfaces::msg::Vertex last_target_vertex;
+    gbeam2_interfaces::msg::Vertex curr_vertex;
+    std::vector<int> path;
+
+    // Action
+    rclcpp_action::Server<Task>::SharedPtr action_server_;
     
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr  pos_ref_publisher_;
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_subscriber_;
     rclcpp::TimerBase::SharedPtr timer_;
+
+    // Actions routines
+
+    rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const Task::Goal> goal)
+    {
+        RCLCPP_INFO(this->get_logger(), "Received goal request to get to Cluster %d", goal->cluster_id_task);
+        (void)uuid;
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
+
+    rclcpp_action::CancelResponse handle_cancel(
+        const std::shared_ptr<rclcpp_action::ServerGoalHandle<Task>> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Received request to cancel goal");
+        (void)goal_handle;
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
+
+    void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<Task>> goal_handle)
+    {
+        using namespace std::placeholders;
+        // this needs to return quickly to avoid blocking the executor, so spin up a new thread
+        std::thread{std::bind(&ExplorationNode::execute, this, _1), goal_handle}.detach();
+    }
+
+    void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<Task>> goal_handle)
+    {
+        RCLCPP_INFO(this->get_logger(), "Executing goal");
+        rclcpp::Rate loop_rate(1);
+        int N = 10; // Useless variable, just to mantain the structure of the
+        const auto goal = goal_handle->get_goal();
+        auto feedback = std::make_shared<Task::Feedback>();
+        
+        auto result = std::make_shared<Task::Result>();
+
+        for (int i = 1; (i < N) && rclcpp::ok(); ++i) {
+            // Check if there is a cancel request
+            if (goal_handle->is_canceling()) {
+                // Modify here the result information
+                goal_handle->canceled(result);
+                RCLCPP_INFO(this->get_logger(), "Goal canceled");
+                return;
+            }
+            
+            
+            // Publish feedback
+            goal_handle->publish_feedback(feedback);
+            RCLCPP_INFO(this->get_logger(), "Publish feedback");
+
+            loop_rate.sleep();
+        }
+
+        // Check if goal is done
+        if (rclcpp::ok()) {
+            // Modify here the result information
+            goal_handle->succeed(result);
+            RCLCPP_INFO(this->get_logger(), "Goal succeeded");
+        }
+    }
 
 
     void graphCallback(const gbeam2_interfaces::msg::Graph::SharedPtr graph_ptr)
@@ -120,8 +203,37 @@ private:
         E = graph.edges.size();
     }
 
+    int getBestNode(){
+        // 
+    }
+
+    std::pair<int, bool> pathUpdate(gbeam2_interfaces::msg::Vertex pos){
+        // Check at which point I am in the path 
+        // return the last reached vertex and a bool if is the last element of the path (the target)
+        int last_reached;
+        bool is_target = false;
+
+        // example of a path: [0 - 3 - 11 - 1]
+        // #################   s - p -  p - t
+
+        if(dist(last_target_vertex, pos) <= reached_tol){
+            // we get to the next node in the path
+            last_reached = last_target_vertex.id;
+            // Modify last_target and reduce path 
+            // Pop the first element
+            // If the last reached vertex is the last element of path
+            // set is_target == true;
+        } else{
+            //we're still in the previous one
+            last_reached = path[0];
+        }
+
+
+        return std::make_pair(last_reached,is_target);
+    }
+
     void computeNewTarget()
-{
+    {
     geometry_msgs::msg::PoseStamped pos_ref;
 
     // Use the actual size of the graph
@@ -168,7 +280,7 @@ private:
     RCLCPP_INFO(this->get_logger(), "Target %d node (best): %d", best_node, graph.nodes[best_node].id);
 
     RCLCPP_INFO(this->get_logger(), "Computing path from %d to %d", last_target, best_node);
-    std::vector<int> path;
+    
     try {
         //path = dijkstra(graph, last_target, best_node);
         path = dijkstraWithAdj(graph, last_target, best_node);
@@ -202,7 +314,7 @@ private:
     } else {
         RCLCPP_ERROR(this->get_logger(), "Invalid last_target after path computation: %d", last_target);
     }
-}
+    }
         
     void explorationCallback(){
         

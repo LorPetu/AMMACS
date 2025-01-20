@@ -1,0 +1,13 @@
+# Request
+gbeam2_interfaces/Graph     assigned_graph
+int64                       cluster_id_task
+int64                         belong_to
+gbeam2_interfaces/Bridge    target_bridge
+---
+# Result
+bool task_completed
+gbeam2_interfaces/Vertex last_reached
+---
+
+# Feedback
+gbeam2_interfaces/Vertex curr_vert

@@ -1,6 +1,7 @@
 //----------------------------------- INCLUDE ----------------------------------------------------------------
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/node.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
 #include "rclcpp/node_options.hpp"
 
 #include <math.h>
@@ -10,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <queue>
+#include <thread>
 
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -27,6 +29,7 @@
 #include "std_srvs/srv/set_bool.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
 
+#include "gbeam2_interfaces/action/assigned_task.hpp"
 #include "gbeam2_interfaces/msg/status.hpp"
 #include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
 #include "library_fcn.hpp"
@@ -40,7 +43,9 @@
 class CooperationNode : public rclcpp::Node
 {
 public:
-  CooperationNode() : Node("coop_manager"){
+
+  using Task = gbeam2_interfaces::action::AssignedTask;
+  explicit CooperationNode() : Node("coop_manager"){
 
     //SUBSCRIBED TOPICS
     odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -76,7 +81,12 @@ public:
         "start_coop",std::bind(&CooperationNode::startCooperation,this, std::placeholders::_1, std::placeholders::_2));
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), std::bind(&CooperationNode::navigationCallback, this));
-
+    
+    // Create Action client for exploration node
+    this->action_client_ = rclcpp_action::create_client<Task>(
+      this,
+      "Task"
+    );
     //cluster_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&CooperationNode::CreateClusterGraph, this));
 
      // Initialize parameters
@@ -156,6 +166,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  start_coop_service_;
+  rclcpp_action::Client<Task>::SharedPtr action_client_;
 
   //rclcpp::TimerBase::SharedPtr cluster_timer_;
 
@@ -224,6 +235,18 @@ private:
       //RCLCPP_INFO(this->get_logger(),"odom received: x:%f y:%f",robot_odom_.pose.pose.position.x,robot_odom_.pose.pose.position.y);
   }
   
+  void startCooperation(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response){
+      start_coop=request->data; 
+
+  }
+
+  void statusCallback(const gbeam2_interfaces::msg::Status::SharedPtr received_status){
+    last_status[received_status->robot_id]=*received_status;
+    if(!start_coop) return;
+
+
+  }
+
   gbeam2_interfaces::msg::Graph compareUpdates(
         const std::shared_ptr<const gbeam2_interfaces::msg::Graph>& current_graph,
         const std::shared_ptr<const gbeam2_interfaces::msg::Graph>& previous_graph)
@@ -650,22 +673,70 @@ private:
     assigned_graph_pub_->publish(getAssignedGraph(clusters_to_send));
   }
 
+  // Action routines
 
-  
+  void goal_response_callback(const rclcpp_action::ClientGoalHandle<Task>::SharedPtr &goal_handle){
 
-  
-
-  void startCooperation(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response){
-      start_coop=request->data; 
-
+      if (!goal_handle)
+      {
+          RCLCPP_ERROR(this->get_logger(), "Goal was rejected by the server");
+      }
+      else
+      {
+          RCLCPP_INFO(this->get_logger(), "Goal accepted by the server, waiting for result...");
+      }
   }
 
-  void statusCallback(const gbeam2_interfaces::msg::Status::SharedPtr received_status){
-    last_status[received_status->robot_id]=*received_status;
-    if(!start_coop) return;
-
-
+  void feedback_callback(rclcpp_action::ClientGoalHandle<Task>::SharedPtr, const std::shared_ptr<const Task::Feedback> feedback){
+      RCLCPP_INFO(this->get_logger(), "Received feedback: progress = %f", feedback->curr_vert.gain);
   }
+
+  void result_callback(const rclcpp_action::ClientGoalHandle<Task>::WrappedResult &result){
+
+      switch (result.code)
+      {
+      case rclcpp_action::ResultCode::SUCCEEDED:
+          RCLCPP_INFO(this->get_logger(), "Goal succeeded! Result: %d", result.result->task_completed);
+          break;
+      case rclcpp_action::ResultCode::ABORTED:
+          RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
+          break;
+      case rclcpp_action::ResultCode::CANCELED:
+          RCLCPP_ERROR(this->get_logger(), "Goal was canceled");
+          break;
+      default:
+          RCLCPP_ERROR(this->get_logger(), "Unknown result code");
+          break;
+      }
+  }
+
+  void send_goal(){
+
+    if (!action_client_->wait_for_action_server(std::chrono::seconds(5)))
+    {
+        RCLCPP_ERROR(this->get_logger(), "Action server not available after waiting");
+        return;
+    }
+
+    // Create a goal message
+    auto goal_msg = Task::Goal();
+    goal_msg.cluster_id_task = 1; // Example goal data
+
+    RCLCPP_INFO(this->get_logger(), "Sending goal to cluster ID: %d", goal_msg.cluster_id_task);
+
+    // Send the goal asynchronously
+    auto send_goal_options = rclcpp_action::Client<Task>::SendGoalOptions();
+    send_goal_options.goal_response_callback =
+        std::bind(&CooperationNode::goal_response_callback, this, std::placeholders::_1);
+    send_goal_options.feedback_callback =
+        std::bind(&CooperationNode::feedback_callback, this, std::placeholders::_1, std::placeholders::_2);
+    send_goal_options.result_callback =
+        std::bind(&CooperationNode::result_callback, this, std::placeholders::_1);
+
+    action_client_->async_send_goal(goal_msg, send_goal_options);
+  }
+
+  
 };
 
 

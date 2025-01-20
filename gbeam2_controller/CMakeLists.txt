@@ -8,7 +8,7 @@ project(gbeam2_controller)
 # find_package(ament_cmake_auto REQUIRED)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(rclpy REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -32,6 +32,7 @@ add_executable(exploration_node src/exploration_node.cpp)
 
 set(my_dep
   "rclcpp"
+  "rclcpp_action"
   "std_msgs"
   "std_srvs"
   "geometry_msgs"
