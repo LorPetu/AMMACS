@@ -81,7 +81,7 @@ public:
     start_coop_service_ = this->create_service<std_srvs::srv::SetBool>(
         "start_coop",std::bind(&CooperationNode::startCooperation,this, std::placeholders::_1, std::placeholders::_2));
 
-    timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), std::bind(&CooperationNode::navigationCallback, this));
+    //timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), std::bind(&CooperationNode::navigationCallback, this));
     
     // Create Action client for exploration node
     this->action_client_ = rclcpp_action::create_client<Task>(
@@ -239,7 +239,7 @@ private:
   
   void startCooperation(const std::shared_ptr<std_srvs::srv::SetBool::Request> request, std::shared_ptr<std_srvs::srv::SetBool::Response> response){
       start_coop=request->data; 
-
+      navigationCallback();
   }
 
   void statusCallback(const gbeam2_interfaces::msg::Status::SharedPtr received_status){
@@ -406,11 +406,13 @@ private:
       // How to deal with edges? 
       
       for(auto& cl:clusters){
+        RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",cl.nodes.size(),cl.cluster_id);
         result.cluster_graph.clusters.push_back(cl);
         for(auto& node_id:cl.nodes){
           result.nodes.push_back(stored_Graph[cl.belong_to]->nodes[node_id]);
         }
       }
+      RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Total nodes: %d",result.nodes.size());
 
       result.adj_matrix = stored_Graph[name_space_id]->adj_matrix;
       result.length_matrix = stored_Graph[name_space_id]->length_matrix;
@@ -440,7 +442,6 @@ private:
   std::pair<std::vector<int>,double> dijkstraWithAdjandPath(gbeam2_interfaces::msg::GraphCluster graph, int s, int t)
 {
   int N = graph.clusters.size();
-  int E = graph.adj_matrix.size;
   auto adjMatrix = graph.adj_matrix.data;
   //RCLCPP_INFO(this->get_logger(),"Size of adjacency matrix: %d",N);
 
@@ -524,13 +525,13 @@ private:
         // What if i'm tryng to map an external cluster that I don't have?
       }
     }*/
-   RCLCPP_INFO(this->get_logger(),"Start searching for best cluster");
+    RCLCPP_INFO(this->get_logger(),"Start searching for best cluster");
 
-   for(int i=0; i<GlobalClusters.clusters.size(); i++){
+    for(int i=0; i<GlobalClusters.clusters.size(); i++){
       //      if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
         //RCLCPP_INFO(this->get_logger(),"cluster: %d Start searching for best cluster",i);
   
-        auto [path, distance] = (i!=last_selected_cluster_id) ? dijkstraWithAdjandPath(GlobalClusters,curr_cl_id,i):std::make_pair(std::vector<int>{last_selected_cluster_id}, 0.1);;
+        auto [path, distance] = (i!=last_selected_cluster_id) ? dijkstraWithAdjandPath(GlobalClusters,curr_cl_id,i):std::make_pair(std::vector<int>{last_selected_cluster_id}, 0.25);;
         
         
         if(path.size()>0){
@@ -555,7 +556,7 @@ private:
         path_str += std::to_string(node) + "-";
     }
 
-    RCLCPP_INFO(this->get_logger(), "BEST CLUSTER: Path computed with adj is: %s", path_str.c_str());
+    //RCLCPP_INFO(this->get_logger(), "BEST CLUSTER: Path computed with adj is: %s", path_str.c_str());
 
 
     //   if(std::find(occupied_clusters.begin(),occupied_clusters.end(),i) != occupied_clusters.end()){
@@ -642,8 +643,8 @@ private:
       //RCLCPP_INFO(this->get_logger(),"exit from getBestCluster function");
       if(last_selected_cluster_id!=best_cl_id){
         RCLCPP_INFO(this->get_logger(),"last selected cluster: %d ",last_selected_cluster_id);
-        auto best_cl = GlobalClusters.clusters[last_selected_cluster_id];
-        last_selected_cluster_id = best_cl_id;
+        auto best_cl = GlobalClusters.clusters[best_cl_id];
+       
         //RCLCPP_INFO(this->get_logger(),"Global cluster array is ok:");
         if(best_cl.belong_to!=name_space_id){
           
@@ -651,7 +652,14 @@ private:
           RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
         }else{          
           RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
+          last_selected_cluster_id = best_cl_id;
+          last_selected_cluster = best_cl;
+          std::string path_str;
+          for (auto node : clusters_to_send) {
+              path_str += std::to_string(node.cluster_id) + "-";
+          }
           send_goal(getAssignedGraph(clusters_to_send),last_selected_cluster,false);
+          
         }
       }else{
         RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster_id);
@@ -698,7 +706,8 @@ private:
   }
 
   void feedback_callback(rclcpp_action::ClientGoalHandle<Task>::SharedPtr, const std::shared_ptr<const Task::Feedback> feedback){
-      RCLCPP_INFO(this->get_logger(), "Current node visited id: %d with cluster_id: %d", feedback->curr_vert.id,feedback->curr_vert.cluster_id);
+      //RCLCPP_INFO(this->get_logger(), "Current node visited id: %d with cluster_id: %d", feedback->curr_vert.id,feedback->curr_vert.cluster_id);
+      current_cluster_pub_->publish(GlobalClusters.clusters[cluster_l2g_index[feedback->curr_vert.belong_to][feedback->curr_vert.cluster_id]]);
   }
 
   void result_callback(const rclcpp_action::ClientGoalHandle<Task>::WrappedResult &result){
@@ -719,8 +728,10 @@ private:
           break;
       }
 
-       // Reset current goal handle after result
-        current_goal_handle_.reset();
+      // Reset current goal handle after result
+      current_goal_handle_.reset();
+
+      navigationCallback();
   }
 
   void send_goal(gbeam2_interfaces::msg::Graph assigned_graph, gbeam2_interfaces::msg::GraphClusterNode cluster_task, const bool has_bridge, const gbeam2_interfaces::msg::Bridge &bridge = gbeam2_interfaces::msg::Bridge()){
@@ -752,7 +763,7 @@ private:
     
     if(has_bridge) goal_msg.target_bridge = bridge;
 
-    RCLCPP_INFO(this->get_logger(), "Sending goal to cluster ID: %d", goal_msg.cluster_id_task);
+    //RCLCPP_INFO(this->get_logger(), "Sending goal to cluster ID: %d", goal_msg.cluster_id_task);
 
     // Send the goal asynchronously
     auto send_goal_options = rclcpp_action::Client<Task>::SendGoalOptions();
@@ -763,7 +774,6 @@ private:
     send_goal_options.result_callback =
         std::bind(&CooperationNode::result_callback, this, std::placeholders::_1);
 
-    // Send the goal asynchronously
     action_client_->async_send_goal(goal_msg, send_goal_options);
   }
 

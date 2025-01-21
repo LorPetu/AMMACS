@@ -52,8 +52,8 @@ public:
     explicit ExplorationNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions()) : Node("graph_expl",options), active_goal_handle_(nullptr)
     {   
         name_space = this->get_namespace();
-        graph_subscriber_ = this->create_subscription<gbeam2_interfaces::msg::Graph>(
-            "gbeam/reachability_graph", 1, std::bind(&ExplorationNode::graphCallback, this, std::placeholders::_1));
+        // graph_subscriber_ = this->create_subscription<gbeam2_interfaces::msg::Graph>(
+        //     "gbeam/reachability_graph", 1, std::bind(&ExplorationNode::graphCallback, this, std::placeholders::_1));
 
         //"coop/assigned_graph"   OR "gbeam/reachability_graph" 
 
@@ -140,11 +140,12 @@ private:
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_subscriber_;
 
 
-    std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
+    std::pair<float,std::vector<int>>  dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
     {
     int N = graph.nodes.size();
     int E = graph.adj_matrix.size;
     auto adjMatrix = graph.adj_matrix.data;
+    int N_matrix = graph.adj_matrix.size;
 
     // Since we're considering only reachable node we skip the filtering part.
 
@@ -168,7 +169,7 @@ private:
             // Explore neighbors
             for (int v = 0; v < N; v++) {
             int v_id = graph.nodes[v].id;
-                double weight = adjMatrix[u_id*N + v_id]; // adj.data[i * N + j] = matrix[i][j];
+                double weight = adjMatrix[u_id*N_matrix + v_id]; // adj.data[i * N + j] = matrix[i][j];
                 if (weight > 0 && dist[u] + weight < dist[v]) {
                     dist[v] = dist[u] + weight;
                     parent[v] = u;
@@ -185,26 +186,22 @@ private:
 
         // Check if the path starts with the source
         if (!path.empty() && path[0] == s) {
-            return path;
+            return std::make_pair(dist[t],path);
         }
         return {}; // Return empty if there's no valid path
-
-
-        return path;
     }
 
-        // Actions routines
+    // Actions routines
 
-     // Handle incoming goal requests
-    rclcpp_action::GoalResponse handle_goal( const rclcpp_action::GoalUUID &uuid,
-        std::shared_ptr<const Task::Goal> goal)
+    // Handle incoming goal requests
+    rclcpp_action::GoalResponse handle_goal( const rclcpp_action::GoalUUID &uuid, std::shared_ptr<const Task::Goal> goal)
     {
-        RCLCPP_INFO(this->get_logger(), "Received goal request");
+        //RCLCPP_INFO(this->get_logger(), "Received goal request");
 
         // Reject the goal if another goal is active
         if (active_goal_handle_)
         {
-            RCLCPP_WARN(this->get_logger(), "Another goal is already active. Rejecting this goal.");
+            //RCLCPP_WARN(this->get_logger(), "Another goal is already active. Rejecting this goal.");
             return rclcpp_action::GoalResponse::REJECT;
         }
 
@@ -229,13 +226,16 @@ private:
         // Start the goal execution in a separate thread
         std::thread([this, goal_handle]() { this->execute(goal_handle); }).detach();
     }
+
     void execute(const std::shared_ptr<rclcpp_action::ServerGoalHandle<Task>> goal_handle)
     {
-        RCLCPP_INFO(this->get_logger(), "Executing goal");
         rclcpp::Rate loop_rate(4); //4Hz - every 250ms
 
         const auto goal = goal_handle->get_goal();
+        // Same inizialization of graph callback
         graph = goal->assigned_graph;
+        N = graph.nodes.size();
+
         task_completed = false;
         int local_target =-1; // Local enumeration of nodes using index (last_reached follow the same logic)
         geometry_msgs::msg::PoseStamped pos_ref;
@@ -243,14 +243,27 @@ private:
         auto feedback = std::make_shared<Task::Feedback>();        
         auto result = std::make_shared<Task::Result>();
 
+        RCLCPP_INFO(this->get_logger(),"Execute goal: explore cluster %d of robot%d",goal->cluster_id_task, goal->belong_to);
+
         if(last_target<0){
             // Inizialization, node is just started
             // Get the node on which i am
+            // Here we assume that at first the enumeration of local and global is the same
             auto [dist, id] = vert_graph_distance_noobstacle(graph,getCurrPos()); 
             curr_vertex = graph.nodes[id];
             last_target_vertex = curr_vertex;
             last_target = id;
-            RCLCPP_INFO(this->get_logger(), "I am on the node with id: global:%d", id);        
+            RCLCPP_INFO(this->get_logger(), "INIT: I am on the node with id: global:%d", id);        
+        }else{
+            // We need to get the local enumaration of the last_target_vertex
+            for(int n=0; n<graph.nodes.size();n++){
+                if(graph.nodes[n].id == last_target_vertex.id && graph.nodes[n].belong_to == last_target_vertex.belong_to){
+                    last_target = n;
+                    RCLCPP_INFO(this->get_logger(),"Last target node was n: %d id: %d",last_target, last_target_vertex.id);
+                    break;
+                }
+            }
+            
         }
 
         if(goal->has_target_bridge){
@@ -265,17 +278,20 @@ private:
                 }
             }
 
-            path = dijkstraWithAdj(graph, last_target, local_target);
+            path = dijkstraWithAdj(graph, last_target, local_target).second;
 
         }else{
             // Client doesn't specify any particular target node, just need to explore a cluster
             // At start select the best node
 
-            local_target = getBestNode(goal->cluster_id_task);
+            auto bestpair = getBestNode(goal->cluster_id_task);
+
+            local_target    =   bestpair.first;
+            path            =   bestpair.second;
 
             // Compute the path to it 
 
-            path = dijkstraWithAdj(graph, last_target, local_target);
+            //path = dijkstraWithAdj(graph, last_target, local_target);
             
         }
 
@@ -302,7 +318,14 @@ private:
             RCLCPP_ERROR(this->get_logger(), "Invalid last_target after path computation: %d", last_target);
         }
 
-        // Exploration Callback
+        // ##########################################
+        // ##### Assigned Cluster Exploration #######
+        // ##########################################
+
+        // Explore the assigned cluster 
+        // or current action is aborted
+        // OR IF I HAVE A TARGET BRIDGE
+        // once the bridge end is reached
 
         while(!task_completed && rclcpp::ok()){
 
@@ -313,39 +336,20 @@ private:
                 RCLCPP_INFO(this->get_logger(), "Goal canceled");
                 return;
             }
-
-            // Explore the assigned cluster until there's no more unexplored node
-            // or current action is aborted
-            // OR IF I HAVE A TARGET BRIDGE
-            // once the bridge end is reached
           
             auto [last_reached,is_local_target] = pathHandle(getCurrPos());
 
             if(is_local_target){
                 curr_vertex = last_target_vertex;
                 if(goal->has_target_bridge){
-                    // End task
-                    task_completed = true;
-                }else{ 
-                    // ##########################################
-                    // ##### Assigned Cluster Exploration #######
-                    // ##########################################
-
-                    local_target = getBestNode(goal->cluster_id_task);
-                    path = dijkstraWithAdj(graph, last_target, local_target);
-
-                    std::string local_path_str, global_path_str;
-                    for (int node : path) {
-                        local_path_str += std::to_string(node) + "-";
-                        global_path_str += std::to_string(graph.nodes[node].id) + "-";
-                    }
-
-                    RCLCPP_INFO(this->get_logger(), "Local Path : %s", local_path_str.c_str());
-                    RCLCPP_INFO(this->get_logger(), "Global Path: %s", global_path_str.c_str());
-   
-
-                    task_completed=true; // TODO: just when there are no more unexplored nodes 
+                    
+                }else{  
+                                        
                 }
+                
+
+                task_completed=true; // TODO: just when there are no more unexplored nodes 
+
             }else{
                 curr_vertex = graph.nodes[last_reached];
 
@@ -374,43 +378,44 @@ private:
         
     }
 
-
-    void graphCallback(const gbeam2_interfaces::msg::Graph::SharedPtr graph_ptr)
-    {
-        graph = *graph_ptr;
-        N = graph.nodes.size();
-        E = graph.edges.size();
-    }
-
-    int getBestNode(int cluster_id){
+    std::pair<int, std::vector<int>> getBestNode(int cluster_id){
         // Get the Best node among the one inside the specified cluster
-        float max_reward = 0;
-        int best_node = 0;
+        float max_reward = 0.0;
+        int best_node = -1;
+        std::vector<int> bestPath;
         std::vector<float> dist(N, INF);
-
-        shortestDistancesWithAdjMatrix(graph, dist.data(), last_target);
 
 
         for(size_t n = 0; n < N; n++)
         {
-            if(graph.nodes[n].is_reachable)
+            if(n!=last_target)
             {
-                if (dist[n] == INF || graph.nodes[n].cluster_id!=cluster_id) {
+                auto [distance, path] =  dijkstraWithAdj(graph,last_target,n);
+
+                if(graph.nodes[n].cluster_id!=cluster_id){
+                    RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d", n, graph.nodes[n].id,cluster_id);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue;  
                 }
-                float reward = graph.nodes[n].gain / std::pow(dist[n], distance_exp);
+                float reward = graph.nodes[n].gain / std::pow(distance, distance_exp);
+                RCLCPP_INFO(this->get_logger(),"Node %d: id: %d reward: %f", n, graph.nodes[n].id,reward);
                 if(reward > max_reward)
                 {
                     max_reward = reward;
                     best_node = n;
+                    bestPath = path;
                 }
             }
         }
 
+        if(best_node<0){
+            RCLCPP_WARN(this->get_logger(),"No best node has been found");
+            return std::make_pair(last_target,std::vector<int>());;
+        }
+
         RCLCPP_INFO(this->get_logger(), "Best node -> local id: %d global id: %d", best_node, graph.nodes[best_node].id);
 
-        return best_node;
+        return std::make_pair(best_node,bestPath);
     }
 
     std::pair<int, bool> pathHandle(gbeam2_interfaces::msg::Vertex pos) {
@@ -426,7 +431,7 @@ private:
         // Check if the current position has reached the next vertex in the path
         if (dist(intermediate_target_vertex, pos) <= reached_tol) {
             // We've reached the next node in the path
-            RCLCPP_INFO(this->get_logger(),"pathHandle::Reached intermediate target!");
+            //RCLCPP_INFO(this->get_logger(),"pathHandle::Reached intermediate target!");
             last_reached = path[1];  // The node we just reached
 
             // Modify last_target and reduce path
@@ -434,7 +439,7 @@ private:
 
             // If we reach the end of the path, set is_target to true
             if (path.empty()) {
-                RCLCPP_INFO(this->get_logger(),"pathHandle::Reached end of the path!");
+                //RCLCPP_INFO(this->get_logger(),"pathHandle::Reached end of the path!");
                 is_target = true;
                 curr_vertex=last_target_vertex;
             } else {
@@ -444,7 +449,7 @@ private:
             }
         } else {
             // We're still on the current path segment
-            RCLCPP_INFO(this->get_logger(),"pathHandle::Still at previous step");
+            //RCLCPP_INFO(this->get_logger(),"pathHandle::Still at previous step");
             last_reached = path[0];
             intermediate_target_vertex = graph.nodes[path[1]];
             curr_vertex = graph.nodes[path[0]];
@@ -452,7 +457,6 @@ private:
 
         return std::make_pair(last_reached, is_target);
     }
-
     
     gbeam2_interfaces::msg::Vertex getCurrPos(){
         geometry_msgs::msg::TransformStamped l2g_tf;
