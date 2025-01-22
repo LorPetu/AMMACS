@@ -126,6 +126,7 @@ private:
     std::string name_space;
     
     gbeam2_interfaces::msg::Graph graph;
+    std::vector<gbeam2_interfaces::msg::GraphAdjacency> getAdjMatrixof;
     gbeam2_interfaces::msg::Vertex last_target_vertex;
     gbeam2_interfaces::msg::Vertex intermediate_target_vertex;
     gbeam2_interfaces::msg::Vertex curr_vertex;
@@ -190,7 +191,22 @@ private:
         }
         return {}; // Return empty if there's no valid path
     }
+    
+    void moveToBridge(gbeam2_interfaces::msg::Bridge target_bridge, int& local_target){
+        // Modify the path to get to the target_bridge starting from last_target
+        // Also modify local_target variable
+        int bridge_end_id = (last_target_vertex.belong_to == target_bridge.r1) ? target_bridge.v1 : target_bridge.v2;
+        graph.adj_matrix = getAdjMatrixof[last_target_vertex.belong_to];
+             
+            for(int i=0; i<graph.nodes.size();i++){
+                if(graph.nodes[i].id==bridge_end_id) {
+                    local_target = i; 
+                    break;
+                }
+            }
 
+            path = dijkstraWithAdj(graph, last_target, local_target).second;
+    }
     // Actions routines
 
     // Handle incoming goal requests
@@ -232,12 +248,15 @@ private:
         rclcpp::Rate loop_rate(4); //4Hz - every 250ms
 
         const auto goal = goal_handle->get_goal();
-        // Same inizialization of graph callback
+        // Same inizialization of graph callback global variables
         graph = goal->assigned_graph;
         N = graph.nodes.size();
+        getAdjMatrixof = goal->adj_matrix;
 
         task_completed = false;
         int local_target =-1; // Local enumeration of nodes using index (last_reached follow the same logic)
+        int traspassed_bridges = 0;
+        bool has_target_bridge = goal->has_target_bridge;
         geometry_msgs::msg::PoseStamped pos_ref;
         
         auto feedback = std::make_shared<Task::Feedback>();        
@@ -266,32 +285,21 @@ private:
             
         }
 
-        if(goal->has_target_bridge){
+        if(has_target_bridge){
             // I need to go to an external cluster and get to a bridge end to traspass it
 
-            int bridge_end_id = (graph.robot_id == goal->target_bridge.r1) ? goal->target_bridge.v1 : goal->target_bridge.v2;
-             
-            for(int i=0; i<graph.nodes.size();i++){
-                if(graph.nodes[i].id==bridge_end_id) {
-                    local_target = i; 
-                    break;
-                }
-            }
+            auto target_bridge = goal->target_bridge[traspassed_bridges];
 
-            path = dijkstraWithAdj(graph, last_target, local_target).second;
+            moveToBridge(target_bridge, local_target);
 
         }else{
             // Client doesn't specify any particular target node, just need to explore a cluster
-            // At start select the best node
+            // At start select the best node and compute the path to it
 
             auto bestpair = getBestNode(goal->cluster_id_task);
 
             local_target    =   bestpair.first;
             path            =   bestpair.second;
-
-            // Compute the path to it 
-
-            //path = dijkstraWithAdj(graph, last_target, local_target);
             
         }
 
@@ -341,14 +349,52 @@ private:
 
             if(is_local_target){
                 curr_vertex = last_target_vertex;
-                if(goal->has_target_bridge){
+                if(has_target_bridge){
+                    // Traspass bridge
+                    // Maybe is not needed? 
+
+                    // Update curr_vertex and last_target
+
+                    auto& trasp_bridge = goal->target_bridge[traspassed_bridges];
+
+                    int bridge_end_id = (last_target_vertex.belong_to == trasp_bridge.r1) ? trasp_bridge.v2 : trasp_bridge.v1;
                     
+                        
+                    for(int i=0; i<graph.nodes.size();i++){
+                        if(graph.nodes[i].id==bridge_end_id) {
+                            local_target = i; 
+                            last_target_vertex = graph.nodes[i];
+                                                        
+                            break;
+                        }
+                    }
+
+                    graph.adj_matrix = getAdjMatrixof[last_target_vertex.belong_to];
+
+                    // Verify that all the bridges has been traspassed
+                    traspassed_bridges++;
+                    if(traspassed_bridges>graph.cluster_graph.bridges.size()){
+                        // If all the bridges are traspassed i need to compute the best node 
+                        // among the one of the target cluster and switch adjacency matrix
+                        graph.adj_matrix = goal->adj_matrix[goal->belong_to];
+
+                        auto bestpair = getBestNode(goal->cluster_id_task);
+
+                        local_target    =   bestpair.first;
+                        path            =   bestpair.second;
+
+                        has_target_bridge = false;
+                        //task_completed =true;
+                    }else{
+                        moveToBridge(goal->target_bridge[traspassed_bridges], local_target);
+                    }
                 }else{  
-                                        
+
+                    task_completed=true; // TODO: just when there are no more unexplored nodes                  
                 }
                 
 
-                task_completed=true; // TODO: just when there are no more unexplored nodes 
+                
 
             }else{
                 curr_vertex = graph.nodes[last_reached];
@@ -397,7 +443,7 @@ private:
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue;  
                 }
-                float reward = graph.nodes[n].gain / std::pow(distance, distance_exp);
+                float reward = 100*graph.nodes[n].gain / std::pow(distance, distance_exp);
                 RCLCPP_INFO(this->get_logger(),"Node %d: id: %d reward: %f", n, graph.nodes[n].id,reward);
                 if(reward > max_reward)
                 {

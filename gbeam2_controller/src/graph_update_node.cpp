@@ -575,9 +575,6 @@ private:
                 }
             
         }
-        gbeam2_interfaces::msg::Vertex position;
-        position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
-        //poly_ptr->polygon.vertices_reachable.push_back(position);
         
         //std::is_empty<gbeam2_interfaces::msg::FreePolygonStamped>
         if(received_ext_nodes){
@@ -955,8 +952,8 @@ private:
         }
 
         // update exploration gain
-        //gbeam2_interfaces::msg::Vertex position;
-        //position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
+        gbeam2_interfaces::msg::Vertex position;
+        position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
         for (int i=0; i<graph.nodes.size(); i++)
         {
             if (dist(position, graph.nodes[i]) < node_dist_open)

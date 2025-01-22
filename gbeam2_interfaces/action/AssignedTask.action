@@ -3,7 +3,8 @@ gbeam2_interfaces/Graph     assigned_graph
 int64                       cluster_id_task
 int64                       belong_to
 bool                        has_target_bridge
-gbeam2_interfaces/Bridge    target_bridge
+gbeam2_interfaces/GraphAdjacency[] adj_matrix
+gbeam2_interfaces/Bridge[]  target_bridge
 ---
 # Result
 bool task_completed
