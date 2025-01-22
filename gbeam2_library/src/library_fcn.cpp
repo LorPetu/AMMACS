@@ -106,11 +106,11 @@ bool onSegment(geometry_msgs::msg::Point32 p, geometry_msgs::msg::Point32 q, geo
 // Find orientation of ordered triplet (p, q, r)
 // 0 --> p, q and r are colinear
 // 1 --> Clockwise
-// 2 --> Counterclockwise
+// -1 --> Counterclockwise
 int orientation(geometry_msgs::msg::Point32 p, geometry_msgs::msg::Point32 q, geometry_msgs::msg::Point32 r)
 {
     float val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-    return (val > 0) ? 1 : ((val<0) ? 2 : 0);
+    return (val > 0) ? 1 : ((val<0) ? -1 : 0);
 }
 // Check intersection between segment 'p1q1' and 'p2q2'
 bool doIntersect(geometry_msgs::msg::Point32 p1, geometry_msgs::msg::Point32 q1, geometry_msgs::msg::Point32 p2, geometry_msgs::msg::Point32 q2)
