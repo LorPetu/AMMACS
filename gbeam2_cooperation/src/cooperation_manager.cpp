@@ -621,7 +621,7 @@ private:
           // Send GOAL
           send_goal(clusters_to_send,last_selected_cluster,false);
 
-
+          last_selected_cluster.is_target = true;
           current_cluster_pub_->publish(last_selected_cluster);
           return;
 
@@ -711,6 +711,7 @@ private:
 
 
     // Publish to status the current cluster
+    last_selected_cluster.is_target = true;
     current_cluster_pub_->publish(last_selected_cluster);
 
     // Build a graph with only selected cluster and publish it to the explorer 

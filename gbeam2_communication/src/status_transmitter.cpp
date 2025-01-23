@@ -124,7 +124,12 @@ private:
   }
 
   void currentClusterCallback(const gbeam2_interfaces::msg::GraphClusterNode::SharedPtr received_cluster){
-    curr_status[name_space_id].current_cluster=*received_cluster;
+    if(received_cluster->is_target){
+      curr_status[name_space_id].target_cluster=*received_cluster;
+    }else{
+      curr_status[name_space_id].current_cluster=*received_cluster;
+    }
+    
   }
 
 
