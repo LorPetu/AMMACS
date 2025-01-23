@@ -33,6 +33,7 @@
 #include "gbeam2_interfaces/action/assigned_task.hpp"
 #include "gbeam2_interfaces/msg/status.hpp"
 #include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
+#include "gbeam2_interfaces/msg/global_map.hpp"
 #include "library_fcn.hpp"
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -52,7 +53,7 @@ public:
     odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
             name_space+ "odom", 1, std::bind(&CooperationNode::odomCallback, this, std::placeholders::_1));
 
-    merged_graph_sub_= this->create_subscription<gbeam2_interfaces::msg::Graph>(
+    merged_graph_sub_= this->create_subscription<gbeam2_interfaces::msg::GlobalMap>(
       "gbeam/merged_graph",1,std::bind(&CooperationNode::mergedGraphCallback,this,std::placeholders::_1));
 
     // Get namespace
@@ -106,13 +107,13 @@ public:
     RCLCPP_INFO(this->get_logger(),"2) Communication range: %f",wifi_range);
 
     // Initialize vectors with the correct size
-    stored_Graph.resize(N_robot);
+    //stored_Graph.resize(N_robot);
     last_status.resize(N_robot);
     cluster_l2g_index.resize(N_robot);
     last_status[name_space_id].robot_id = name_space_id;
     for (int i = 0; i < N_robot; i++)
     {
-      stored_Graph[i] = std::make_shared<gbeam2_interfaces::msg::Graph>();
+      //stored_Graph->map[i] = std::make_shared<gbeam2_interfaces::msg::Graph>();
       last_status[i].connection_status.resize(N_robot);
       last_status[i].joint_vector.resize(N_robot);
       last_status[i].normal_joint_vector.resize(N_robot);
@@ -130,7 +131,7 @@ private:
   double wifi_range;
 
   // Storage of external information 
-  std::vector<std::shared_ptr<gbeam2_interfaces::msg::Graph>> stored_Graph;
+  gbeam2_interfaces::msg::GlobalMap::SharedPtr stored_Graph;
   gbeam2_interfaces::msg::GraphCluster GlobalClusters;
   std::vector<std::unordered_map<int,int>> cluster_l2g_index; 
   int last_updated_node;
@@ -159,7 +160,7 @@ private:
 
   // Declare topics variables
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
-  rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr merged_graph_sub_;
+  rclcpp::Subscription<gbeam2_interfaces::msg::GlobalMap>::SharedPtr merged_graph_sub_;
   rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
   rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr assigned_graph_pub_;
   rclcpp::Publisher<gbeam2_interfaces::msg::GraphCluster>::SharedPtr clusters_pub_;
@@ -249,108 +250,28 @@ private:
 
   }
 
-  gbeam2_interfaces::msg::Graph compareUpdates(
-        const std::shared_ptr<const gbeam2_interfaces::msg::Graph>& current_graph,
-        const std::shared_ptr<const gbeam2_interfaces::msg::Graph>& previous_graph)
-    {
-        gbeam2_interfaces::msg::Graph result;
-        int last_node_index = previous_graph->nodes.size();
-        int last_edge_index = previous_graph->edges.size();
+  void mergedGraphCallback(const std::shared_ptr<gbeam2_interfaces::msg::GlobalMap> global_map_received){
 
-        // Reserve space for potential changes (this is a rough estimate)
-        result.nodes.reserve(current_graph->nodes.size() - last_node_index);
-        result.edges.reserve(current_graph->edges.size() - last_edge_index);
-
-        // Check for modifications in existing NODES
-        for (int i = 0; i < last_node_index; ++i) {
-            if (hasVertexChanged(current_graph->nodes[i], previous_graph->nodes[i])) {
-                result.nodes.push_back(current_graph->nodes[i]);
-            }
-        }
-
-        // Add new nodes
-        result.nodes.insert(
-            result.nodes.end(),
-            std::make_move_iterator(current_graph->nodes.begin() + last_node_index),
-            std::make_move_iterator(current_graph->nodes.end())
-        );
-
-        // Check for modifications in existing EDGES
-        for (int i = 0; i < last_edge_index; ++i) {
-            if (hasEdgeChanged(current_graph->edges[i], previous_graph->edges[i])) {
-                result.edges.push_back(current_graph->edges[i]);
-            }
-        }
-
-        // Add new edges
-        result.edges.insert(
-            result.edges.end(),
-            std::make_move_iterator(current_graph->edges.begin() + last_edge_index),
-            std::make_move_iterator(current_graph->edges.end())
-        );
-
-        result.adj_matrix = current_graph->adj_matrix;
-        result.robot_id = current_graph->robot_id;
-
-
-        return result;
-    }
-
-  void mergedGraphCallback(const std::shared_ptr<gbeam2_interfaces::msg::Graph> graph_received){
     
+
+    stored_Graph = global_map_received;
+    int req_robot_id = stored_Graph->last_updater;
+    auto& graph_received = stored_Graph->map[req_robot_id];
+    RCLCPP_INFO(this->get_logger(), "Received global Map last updated by robot%d",req_robot_id);
     bool new_nodes=false;
-     
-    int req_robot_id = graph_received->robot_id;
-    last_updated_node = (stored_Graph[req_robot_id]->nodes.empty()) ? -1 : stored_Graph[req_robot_id]->nodes.back().id;
-    last_updated_edge = (stored_Graph[req_robot_id]->edges.empty()) ? -1 : stored_Graph[req_robot_id]->edges.back().id;
-
-    stored_Graph[req_robot_id]->cluster_graph = graph_received->cluster_graph;
-    stored_Graph[req_robot_id]->adj_matrix = graph_received->adj_matrix;
-    stored_Graph[req_robot_id]->length_matrix = graph_received->length_matrix;
-  
-    // Update node and edges for each graph update received
-    for(gbeam2_interfaces::msg::Vertex node: graph_received->nodes){
-
-      if(node.id<last_updated_node){
-        //update old ones
-        stored_Graph[req_robot_id]->nodes[node.id]=node;          
-      }
-      else{
-        // adding new nodes
-
-        //RCLCPP_INFO(this->get_logger(), "Add new node %d", node.id);
-        stored_Graph[req_robot_id]->nodes.push_back(node);
-        if(!node.is_obstacle){
-          new_nodes = true;
-        }
-        
-      }
-
-    }
-   
-
-    for(gbeam2_interfaces::msg::GraphEdge edge : graph_received->edges){
-      
-      if(edge.id<last_updated_edge){
-        stored_Graph[req_robot_id]->edges[edge.id]=edge;          
-      }
-      else{
-        stored_Graph[req_robot_id]->edges.push_back(edge);
-      }
-    }    
-
+       
     GlobalClusters.clusters.clear();
 
     // Calculate total size needed for global array
     size_t totalSize = 0;
     int offset_index=0;
     for (int i = 0; i < N_robot; i++) {
-        totalSize += stored_Graph[i]->cluster_graph.clusters.size();
+        totalSize += stored_Graph->map[i].cluster_graph.clusters.size();
         if(i<req_robot_id){
           offset_index += totalSize;
         } 
 
-        auto to_add = (i!=req_robot_id) ? stored_Graph[i]->cluster_graph.clusters :graph_received->cluster_graph.clusters;
+        auto to_add = (i!=req_robot_id) ? stored_Graph->map[i].cluster_graph.clusters :graph_received.cluster_graph.clusters;
 
         GlobalClusters.clusters.insert( GlobalClusters.clusters.end(), to_add.begin(), to_add.end() );  
         cluster_l2g_index[i].clear();   
@@ -367,12 +288,12 @@ private:
     
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
       auto& cl_i = GlobalClusters.clusters[i];
-      int N = stored_Graph[cl_i.belong_to]->cluster_graph.clusters.size();
+      int N = stored_Graph->map[cl_i.belong_to].cluster_graph.clusters.size();
 
       for(int j=i+1;j<GlobalClusters.clusters.size(); j++){
         auto& cl_j = GlobalClusters.clusters[j];
         if(cl_i.belong_to==cl_j.belong_to){
-          auto el = stored_Graph[cl_i.belong_to]->cluster_graph.length_matrix.data[i*N + j];
+          auto el = stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data[i*N + j];
           global_adj_matrix[i][j] = (el!=0.0) ? el: -1.0;
           global_adj_matrix[j][i] = global_adj_matrix[i][j];
           //belong_matrix[i][cluster_l2g_index[cl_i.belong_to][neigh_id]] = cl_i.belong_to;    
@@ -385,13 +306,13 @@ private:
 
     //printMatrix(this->get_logger(),global_adj_matrix);
 
-    for(auto& bridge : stored_Graph[req_robot_id]->cluster_graph.bridges){
+    for(auto& bridge : stored_Graph->map[req_robot_id].cluster_graph.bridges){
       global_adj_matrix[cluster_l2g_index[bridge.r1][bridge.c1]][cluster_l2g_index[bridge.r2][bridge.c2]] = bridge.length;
       global_adj_matrix[cluster_l2g_index[bridge.r2][bridge.c2]][cluster_l2g_index[bridge.r1][bridge.c1]] = bridge.length;
       //belong_matrix[cluster_l2g_index[bridge.belong_to][bridge.c1]][cluster_l2g_index[bridge.belong_to][bridge.c2]] = bridge.belong_to;
     }
 
-    GlobalClusters.bridges = stored_Graph[req_robot_id]->cluster_graph.bridges;
+    GlobalClusters.bridges = stored_Graph->map[req_robot_id].cluster_graph.bridges;
     GlobalClusters.adj_matrix = matrix2GraphAdj(global_adj_matrix);
 
     //printMatrix(this->get_logger(),global_adj_matrix);
@@ -408,10 +329,10 @@ private:
       
       for(int i=0; i<clusters_ids.size(); i++){
         auto cl = GlobalClusters.clusters[clusters_ids[i]];
-        RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",cl.nodes.size(),cl.cluster_id);
+        //RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",cl.nodes.size(),cl.cluster_id);
         result.cluster_graph.clusters.push_back(cl);
         for(auto& node_id:cl.nodes){
-          result.nodes.push_back(stored_Graph[cl.belong_to]->nodes[node_id]);
+          result.nodes.push_back(stored_Graph->map[cl.belong_to].nodes[node_id]);
         }
 
         if(i+1 <clusters_ids.size()){
@@ -434,10 +355,10 @@ private:
           }
         }
       }
-      RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Total nodes: %d",result.nodes.size());
+      //RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Total nodes: %d",result.nodes.size());
 
-      result.adj_matrix = stored_Graph[name_space_id]->adj_matrix;
-      result.length_matrix = stored_Graph[name_space_id]->length_matrix;
+      result.adj_matrix = stored_Graph->map[name_space_id].adj_matrix;
+      result.length_matrix = stored_Graph->map[name_space_id].length_matrix;
       // Assign the robot_id of the first cluster in the path
       result.robot_id = GlobalClusters.clusters[clusters_ids[0]].belong_to;
 
@@ -455,7 +376,7 @@ private:
         id_min=i;
         d_min =d;
       } 
-      RCLCPP_INFO(this->get_logger(),"cluster %d --> id: %d dist: %f",i,cl.cluster_id,d);
+      //RCLCPP_INFO(this->get_logger(),"cluster %d --> id: %d dist: %f",i,cl.cluster_id,d);
       i++;
     }
 
@@ -465,7 +386,7 @@ private:
   std::pair<std::vector<int>,double> dijkstraWithAdjandPath(gbeam2_interfaces::msg::GraphCluster graph, int s, int t){
     int N = graph.clusters.size();
     auto adjMatrix = graph.adj_matrix.data;
-    //RCLCPP_INFO(this->get_logger(),"Size of adjacency matrix: %d",N);
+    ////RCLCPP_INFO(this->get_logger(),"Size of adjacency matrix: %d",N);
 
     // Since we're considering only reachable node we skip the filtering part.
 
@@ -574,7 +495,7 @@ private:
       
     }
 
-    RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: %d - average reward: %f - %d clusters away",best_cluster_id, best_reward, best_path.size());
+    //RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: %d - average reward: %f - %d clusters away",best_cluster_id, best_reward, best_path.size());
 
     std::string path_str;
     for (int node : best_path) {
@@ -611,9 +532,9 @@ private:
     if(last_selected_cluster_id<0){
       // Node is just started
       if(!GlobalClusters.clusters.empty()){
-        if(!stored_Graph[name_space_id]->cluster_graph.clusters.empty()){
+        if(!stored_Graph->map[name_space_id].cluster_graph.clusters.empty()){
 
-          RCLCPP_INFO(this->get_logger()," I would select the first cluster among mine");
+          //RCLCPP_INFO(this->get_logger()," I would select the first cluster among mine");
           last_selected_cluster_id = cluster_l2g_index[name_space_id][0];
           last_selected_cluster = GlobalClusters.clusters[last_selected_cluster_id];
           clusters_to_send.push_back(last_selected_cluster_id);
@@ -627,16 +548,16 @@ private:
 
         }else{
           // I have no cluster at all or I didn't already compute one
-          RCLCPP_INFO(this->get_logger(),"I have no cluster at all or I didn't already compute one");
-          if(stored_Graph[name_space_id]->nodes.size()>4){
-            RCLCPP_INFO(this->get_logger(),"I have some nodes but they don't compose a cluster yet");
+          //RCLCPP_INFO(this->get_logger(),"I have no cluster at all or I didn't already compute one");
+          if(stored_Graph->map[name_space_id].nodes.size()>4){
+            //RCLCPP_INFO(this->get_logger(),"I have some nodes but they don't compose a cluster yet");
           }
           else{
             int curr_cl_id = getCurrentCluster(robot_pos);
             if(curr_cl_id!=-1){
               auto curr_cl = GlobalClusters.clusters[curr_cl_id];
 
-              RCLCPP_INFO(this->get_logger(),"I'm in global cluster %d --> id: %d belong to: %d",curr_cl_id,curr_cl.cluster_id,curr_cl.belong_to);
+              //RCLCPP_INFO(this->get_logger(),"I'm in global cluster %d --> id: %d belong to: %d",curr_cl_id,curr_cl.cluster_id,curr_cl.belong_to);
               AreaDivision_isrequired=true;
             }
 
@@ -664,32 +585,32 @@ private:
           for (auto id : clusters_to_send) {
               path_str += std::to_string(id) + "-";
           }
-      RCLCPP_INFO(this->get_logger(), "BEST CLUSTER: Path computed with adj is: %s", path_str.c_str());
+      //RCLCPP_INFO(this->get_logger(), "BEST CLUSTER: Path computed with adj is: %s", path_str.c_str());
 
       // is the current cluster the best? 
       // BEST CLUSTER SEARCH 
       //RCLCPP_INFO(this->get_logger(),"exit from getBestCluster function");
       if(last_selected_cluster_id!=best_cl_id){
-        RCLCPP_INFO(this->get_logger(),"last selected cluster: %d ",last_selected_cluster_id);
+        //RCLCPP_INFO(this->get_logger(),"last selected cluster: %d ",last_selected_cluster_id);
         auto best_cl = GlobalClusters.clusters[best_cl_id];
        
-        //RCLCPP_INFO(this->get_logger(),"Global cluster array is ok:");
+        ////RCLCPP_INFO(this->get_logger(),"Global cluster array is ok:");
         if(best_cl.belong_to!=name_space_id){
-          RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
+          //RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
           
           AreaDivision_isrequired = true;
           
         }else{          
           last_selected_cluster_id = best_cl_id;
           last_selected_cluster = best_cl;
-          RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
+          //RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
           
 
           send_goal(clusters_to_send,last_selected_cluster,false);
           
         }
       }else{
-        RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster_id);
+        //RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster_id);
         send_goal(clusters_to_send,last_selected_cluster,false);
       }
       
@@ -790,8 +711,8 @@ private:
     goal_msg.belong_to = cluster_task.belong_to; 
     goal_msg.assigned_graph = assigned_graph;
     goal_msg.has_target_bridge = has_bridge;
-    for(int z=0; z<stored_Graph.size();z++){
-      goal_msg.adj_matrix.push_back(stored_Graph[z]->adj_matrix);
+    for(int z=0; z<stored_Graph->map.size();z++){
+      goal_msg.adj_matrix.push_back(stored_Graph->map[z].adj_matrix);
     }
     
     

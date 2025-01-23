@@ -155,6 +155,7 @@ private:
     int name_space_id;
 
     gbeam2_interfaces::msg::FreePolygonStamped external_nodes;
+    std::vector<gbeam2_interfaces::msg::Vertex> external_nodes2;
     std::vector<gbeam2_interfaces::msg::Bridge> external_bridges;
     std::vector<gbeam2_interfaces::msg::Bridge> candidates_bridges;
     int N_bridges=0;
@@ -753,7 +754,6 @@ private:
             {
             vert.id = graph.nodes.size();
             vert.is_reachable = true;
-            vert.gain ++;
             if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
             {
                 vert.is_reachable = false;
@@ -958,7 +958,7 @@ private:
         }
 
         // update exploration gain
-        gbeam2_interfaces::msg::Vertex position;
+        /*gbeam2_interfaces::msg::Vertex position;
         position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
         for (int i=0; i<graph.nodes.size(); i++)
         {
@@ -968,7 +968,7 @@ private:
             graph.nodes[i].is_visited = true;
             is_changed = true;
             }
-        }
+        }*/
 
         // ####################################################
         // ############### --- CLUSTERING --- #################

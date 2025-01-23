@@ -137,7 +137,19 @@ private:
     
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr  pos_ref_publisher_;
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_subscriber_;
-
+    
+    void logIntVector(rclcpp::Logger logger, const std::vector<int>& vec, const std::string& vec_name = "vector") {
+        std::ostringstream oss;
+        oss << vec_name << ": [";
+        for (size_t i = 0; i < vec.size(); ++i) {
+            oss << vec[i];
+            if (i < vec.size() - 1) {
+                oss << ", ";
+            }
+        }
+        oss << "]";
+        RCLCPP_INFO(logger, "%s", oss.str().c_str());
+    }
 
     std::pair<float,std::vector<int>>  dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
     {
@@ -270,13 +282,13 @@ private:
             curr_vertex = graph.nodes[id];
             last_target_vertex = curr_vertex;
             last_target = id;
-            RCLCPP_INFO(this->get_logger(), "INIT: I am on the node with id: global:%d", id);        
+            //RCLCPP_INFO(this->get_logger(), "INIT: I am on the node with id: global:%d", id);        
         }else{
             // We need to get the local enumaration of the last_target_vertex
             for(int n=0; n<graph.nodes.size();n++){
                 if(graph.nodes[n].id == last_target_vertex.id && graph.nodes[n].belong_to == last_target_vertex.belong_to){
                     last_target = n;
-                    RCLCPP_INFO(this->get_logger(),"Last target node was n: %d id: %d",last_target, last_target_vertex.id);
+                    //RCLCPP_INFO(this->get_logger(),"Last target node was n: %d id: %d",last_target, last_target_vertex.id);
                     break;
                 }
             }
@@ -307,8 +319,8 @@ private:
             global_path_str += std::to_string(graph.nodes[node].id) + "-";
         }
 
-        RCLCPP_INFO(this->get_logger(), "Local Path : %s", local_path_str.c_str());
-        RCLCPP_INFO(this->get_logger(), "Global Path: %s", global_path_str.c_str());
+        //RCLCPP_INFO(this->get_logger(), "Local Path : %s", local_path_str.c_str());
+        //RCLCPP_INFO(this->get_logger(), "Global Path: %s", global_path_str.c_str());
 
         last_target_vertex = graph.nodes[local_target];
         intermediate_target_vertex = (path.size()>1) ? graph.nodes[path[1]]: last_target_vertex;
@@ -339,7 +351,7 @@ private:
                 result->last_reached = curr_vertex;
                 result->task_completed = false;               
                 goal_handle->canceled(result);
-                RCLCPP_INFO(this->get_logger(), "Goal canceled");
+                //RCLCPP_INFO(this->get_logger(), "Goal canceled");
                 return;
             }
           
@@ -417,7 +429,7 @@ private:
             result->task_completed = task_completed;
             goal_handle->succeed(result);
             active_goal_handle_ = nullptr; // Clear the active goal
-            RCLCPP_INFO(this->get_logger(), "Goal succeeded");
+            //RCLCPP_INFO(this->get_logger(), "Goal succeeded");
         }
         
     }
@@ -434,13 +446,13 @@ private:
         {
             if(n!=last_target)
             {
-                auto [distance, path] =  dijkstraWithAdj(graph,last_target,n);
-
                 if(graph.nodes[n].cluster_id!=cluster_id){
-                    RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d", n, graph.nodes[n].id,cluster_id);
+                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d", n, graph.nodes[n].id,cluster_id);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue;  
                 }
+                auto [distance, path] =  dijkstraWithAdj(graph,last_target,n);
+                logIntVector(this->get_logger(),path,"Path to"+std::to_string(n));
                 float reward = 100*graph.nodes[n].gain / std::pow(distance, distance_exp);
                 RCLCPP_INFO(this->get_logger(),"Node %d: id: %d reward: %f", n, graph.nodes[n].id,reward);
                 if(reward > max_reward)

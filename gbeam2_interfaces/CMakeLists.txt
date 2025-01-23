@@ -31,6 +31,7 @@ set(msg_files
   "msg/GraphCluster.msg"
   "msg/GraphUpdate.msg"
   "msg/Bridge.msg"
+  "msg/GlobalMap.msg"
   "srv/SetMappingStatus.srv"
   "srv/GraphUpdate.srv"
   "action/AssignedTask.action"

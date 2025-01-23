@@ -20,6 +20,8 @@
 #include "gbeam2_interfaces/msg/free_polygon.hpp"
 #include "gbeam2_interfaces/msg/free_polygon_stamped.hpp"
 #include "gbeam2_interfaces/msg/graph_update.hpp"
+#include "gbeam2_interfaces/msg/status.hpp"
+#include "gbeam2_interfaces/msg/global_map.hpp"
 
 #include "tf2/exceptions.h"
 #include "tf2_ros/buffer.h"
@@ -52,8 +54,11 @@ public:
     graph_subscriber_ = this->create_subscription<gbeam2_interfaces::msg::Graph>(
                 "gbeam/reachability_graph", 1, std::bind(&GraphMergerNode::switchCallback, this, std::placeholders::_1),sub_options);
 
+    status_sub_ = this->create_subscription<gbeam2_interfaces::msg::Status>(
+        "/status",1,std::bind(&GraphMergerNode::statusCallback, this, std::placeholders::_1));
+
     // PUBLISHING TOPICS
-    merged_graph_pub_ = this->create_publisher<gbeam2_interfaces::msg::Graph>(
+    merged_graph_pub_ = this->create_publisher<gbeam2_interfaces::msg::GlobalMap>(
                 "gbeam/merged_graph", 1);
     external_updates_pub_ = this->create_publisher<gbeam2_interfaces::msg::GraphUpdate>(
                 "external_nodes", 1);
@@ -96,15 +101,25 @@ public:
     prev_updateBuffer.resize(N_robot);
     timers_CLIENTS.resize(N_robot);
     tracking_timers.data.resize(N_robot);
+    last_update_node_with.resize(N_robot);
+    global_map.map.resize(N_robot);
+    global_map.last_updater=name_space_id;
+    graphBuffer.resize(N_robot);
 
     graph_updates_CLIENTS.resize(N_robot);
 
 
     for (int i = 0; i < N_robot; ++i) {
+        global_map.map[i] = gbeam2_interfaces::msg::Graph();
+        global_map.map[i].robot_id = i;
+        graphBuffer[i] = std::make_shared<gbeam2_interfaces::msg::Graph>();
+        graphBuffer[i]->robot_id = name_space_id;
         curr_updateBuffer[i] = std::make_shared<gbeam2_interfaces::msg::Graph>();
         curr_updateBuffer[i]->robot_id = name_space_id;
         prev_updateBuffer[i] = std::make_shared<gbeam2_interfaces::msg::Graph>();
         prev_updateBuffer[i]->robot_id = name_space_id;
+
+        last_update_node_with[i] = 0;
     }
    
 
@@ -139,6 +154,7 @@ private:
     std::string name_space;
     int name_space_id;
     bool start_merging = false;
+    bool is_gain_updated = false;
 
     // Parameters variables
     int N_robot;
@@ -151,7 +167,8 @@ private:
     rclcpp::CallbackGroup::SharedPtr timers_cb_group;
 
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_subscriber_;
-    rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr merged_graph_pub_;
+    rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
+    rclcpp::Publisher<gbeam2_interfaces::msg::GlobalMap>::SharedPtr merged_graph_pub_;
     rclcpp::Publisher<gbeam2_interfaces::msg::GraphUpdate>::SharedPtr external_updates_pub_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr timer_pub_;
     rclcpp::Service<gbeam2_interfaces::srv::GraphUpdate>::SharedPtr  graph_updates_service_;
@@ -161,6 +178,7 @@ private:
     rclcpp::TimerBase::SharedPtr timer_ptr_;
     std::vector<rclcpp::TimerBase::SharedPtr> timers_CLIENTS;
     std_msgs::msg::Float32MultiArray tracking_timers;
+    std_msgs::msg::Float32MultiArray last_connection_with;
 
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -171,9 +189,12 @@ private:
     bool data_received_ = false;
     gbeam2_interfaces::srv::GraphUpdate::Response updateResponse;
 
-
+    // Local copies of all the map of other robots
+    gbeam2_interfaces::msg::GlobalMap global_map;
+    std::vector<std::shared_ptr<gbeam2_interfaces::msg::Graph>> graphBuffer;
     std::vector<std::shared_ptr<gbeam2_interfaces::msg::Graph>> curr_updateBuffer;
     std::vector<std::shared_ptr<gbeam2_interfaces::msg::Graph>> prev_updateBuffer;
+    std::vector<int> last_update_node_with;
     
 
     geometry_msgs::msg::TransformStamped getTransform(std::string target_frame,std::string source_frame){
@@ -213,6 +234,123 @@ private:
 
     }
 
+    void statusCallback(const std::shared_ptr<gbeam2_interfaces::msg::Status> status){
+        // This function compute features for every robot in the network
+        // RCLCPP_INFO(this->get_logger(), "Status received");
+
+        // Check connection status 
+        //if(name_space_id!=status->robot_id || status->connection_status[name_space_id]!=1) return;
+
+        double node_dist_open = 0.3; //node_dist_open: 0.3
+        // Update exploration gain based on the position and the current occupied cluster
+        std::lock_guard<std::mutex> lock(mutex_); //is needed for simultaneous access to common resource?
+        for (int id :status->current_cluster.nodes)
+        {
+            auto& node = global_map.map[status->current_cluster.belong_to].nodes[id];
+            auto& pos = status->current_position.pose.pose.position;
+            double dist = sqrt(pow(node.x-pos.x, 2) + pow(node.y-pos.y, 2));
+            if (dist < node_dist_open)
+            {
+                node.gain = 0;
+                node.is_visited = true;
+                
+                // RCLCPP_INFO(this->get_logger(), "I want to update the gain of node id: %d cluster: %d of robot%d",
+                //     node.id,node.cluster_id,node.belong_to);
+                if(status->current_cluster.belong_to==name_space_id){
+                    global_map.map[name_space_id].nodes[node.id]=node;
+                }else{
+                    graphBuffer[status->robot_id]->nodes.push_back(node);
+                }
+                
+                
+            }
+        }
+
+        is_gain_updated=true;
+    }
+
+    void updateGlobalMap(const gbeam2_interfaces::msg::Graph graph_received){       
+        
+        int req_robot_id = graph_received.robot_id;
+        auto& prev_graph = global_map.map[graph_received.robot_id];
+        last_update_node_with[req_robot_id] = (prev_graph.nodes.empty()) ? -1 : prev_graph.nodes.back().id;
+        int nodes_added = 0;
+        int nodes_explored = 0;
+        int nodes_explored_by_other = 0;
+
+        RCLCPP_INFO(this->get_logger(), "Update global map with map of robot%d - Last updated node: %d ", req_robot_id,last_update_node_with[req_robot_id]);
+
+        // Fixed things that i want to just be the same
+        // Maybe cluster total gain could change here?
+
+        prev_graph.cluster_graph = graph_received.cluster_graph;
+        prev_graph.adj_matrix = graph_received.adj_matrix;
+        prev_graph.length_matrix = graph_received.length_matrix;
+    
+        // Update node for each graph update received
+        // They can be mine (exploration gain update) among old ones
+        // or old nodes with new exploration gain of req_robot_id
+        // or new nodes of req_robot_id
+
+        for(gbeam2_interfaces::msg::Vertex node: graph_received.nodes){
+            auto& mod_graph = global_map.map[node.belong_to];
+            
+            if(node.id<=last_update_node_with[node.belong_to]){
+                double incoming_gain = node.gain;
+                double actual_gain = mod_graph.nodes[node.id].gain;
+                //update old ones with all the features (cluster_id, gain...)
+                RCLCPP_INFO(this->get_logger(), "OLD Node id: %d of robot%d updated by robot%d",node.id,node.belong_to,req_robot_id);
+
+                if(req_robot_id==name_space_id){
+                    // In this case I'm receiving update by myself (from graph update) 
+                    // For sure the incoming gain will be greater because is never modified in graph_update
+                    if(incoming_gain>actual_gain){
+                        nodes_explored++;
+                        mod_graph.cluster_graph.clusters[node.cluster_id].total_gain -= incoming_gain; 
+                    }   
+
+                }else{
+                    // If instead we're receiving external updates we could have two situation
+                    if (node.belong_to==name_space_id){
+                        // I'm receiving updates regarding my nodes that has been explored by someone else
+                        if(incoming_gain<actual_gain){
+                            nodes_explored_by_other++;
+                            mod_graph.cluster_graph.clusters[node.cluster_id].total_gain -= actual_gain; 
+                        }
+                    }else{
+                        // I'm receving general updates by the req_robot
+                    }                   
+
+                }
+                node.gain = (incoming_gain<actual_gain) ? incoming_gain : actual_gain;
+
+                mod_graph.nodes[node.id]=node;                          
+            }
+            else{
+                // adding new nodes
+                nodes_added ++;
+                RCLCPP_INFO(this->get_logger(), "NEW Node id: %d of robot%d added",node.id,req_robot_id);
+                //RCLCPP_INFO(this->get_logger(), "Add new node %d", node.id);
+                mod_graph.nodes.push_back(node);
+                for (int i = 0; i < N_robot; i++)
+                {
+                    if (i!=name_space_id) {
+                       graphBuffer[req_robot_id]->nodes.push_back(node);
+                    }
+                }
+                
+                
+            }
+
+        }
+
+        RCLCPP_INFO(this->get_logger(), "Add %d NEW nodes to the graph of robot%d", nodes_added, graph_received.robot_id);
+        RCLCPP_INFO(this->get_logger(), "Explored %d nodes in my graph by robot%d", nodes_explored_by_other, graph_received.robot_id);
+        RCLCPP_INFO(this->get_logger(), "Explored %d nodes in my graph", nodes_explored);
+        global_map.last_updater = req_robot_id;
+        
+    }
+
     void serverCallback(const std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Request> request,
                         std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Response> response)
     {   
@@ -225,9 +363,10 @@ private:
             //RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
 
             std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character
-            std::string source_frame = "robot"+ std::to_string(req_robot_id) + "/odom";
+            std::string source_frame = "robot"+ std::to_string(req_robot_id) + "/odom"; 
 
-        
+            // Update the global map with the information just received
+            updateGlobalMap(request->update_request);
 
             // Prepare and publish the fake polygon
             auto [transformed_graph, fake_poly] = graph_transform_and_get_fakepoly(request->update_request,getTransform(target_frame,source_frame));
@@ -251,7 +390,7 @@ private:
             auto status = cv_.wait_for(lock, timeout, [this] { return data_received_; });
 
             if (status) {
-                // Data received within the timeout period
+                // Data from Graph update received within the timeout period
                 //RCLCPP_INFO(this->get_logger(),"Update response success: %d (false is:%d)",updateResponse.success, false);
                 response->update_response = *curr_updateBuffer[req_robot_id];
 
@@ -277,29 +416,29 @@ private:
     }
 
     void switchCallback(const gbeam2_interfaces::msg::Graph::SharedPtr graph)
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        
-        for (int i = 0; i < N_robot; i++)
-        {
-            if (i!=name_space_id) {
-                auto updated_graph = std::make_shared<gbeam2_interfaces::msg::Graph>(compareUpdates(graph, prev_updateBuffer[i]));
-                curr_updateBuffer[graph->last_updater_id] = updated_graph;   
-            }
-        }
-        
+    {   
+        std::lock_guard<std::mutex> lock(mutex_); 
+
+        updateGlobalMap(*graph);
         
         if (graph->last_updater_id != name_space_id) {
-            //RCLCPP_INFO(this->get_logger(), "MERGER:: last nodes updated: %d last_edge_updated: %d", prev_updateBuffer[last_updater_id]->nodes.size(), prev_updateBuffer[last_updater_id]->edges.size());
+            
+            // My own map has been computed considering also external nodes just received 
+            
+            
             updateResponse.success = true;
             data_received_ = true;
             cv_.notify_one();
-            //RCLCPP_INFO(this->get_logger(), "Processing update considering nodes from %d...", graph->last_updater_id);
+            RCLCPP_INFO(this->get_logger(), "Processing update considering nodes from %d...", graph->last_updater_id);
         } else {
-            // This is our own update, publish it
-            //RCLCPP_INFO(this->get_logger(), "Publishing on my own topic...");
-            merged_graph_pub_->publish(*graph);
+
+            /// My own map has been computed considering also external nodes just received 
+            RCLCPP_INFO(this->get_logger(), "Publishing on my own topic... %s", (is_gain_updated) ? "with the gain updated" : "no gain updated");
+            is_gain_updated=false;
         }
+
+        
+        merged_graph_pub_->publish(global_map);
     }
 
     void timeoutCallback(int timer_index){
@@ -322,24 +461,28 @@ private:
 
                     std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Request> request_ = std::make_shared<gbeam2_interfaces::srv::GraphUpdate::Request>();
 
-                    request_->update_request = *curr_updateBuffer[i];                    
-                    prev_updateBuffer[i]=curr_updateBuffer[i];
+                    // PREPARE THE REQUEST 
+                    // request_->update_request = *curr_updateBuffer[i];                    
+                    // prev_updateBuffer[i]=curr_updateBuffer[i];
+                    request_->update_request = *graphBuffer[i];                    
+                  
 
-                    /*while (!graph_updates_CLIENTS[i]->wait_for_service(1s)) {
-                    if (!rclcpp::ok()) {
-                    RCLCPP_ERROR(this->get_logger(), "CLIENT[%d]: Interrupted while waiting for the service. Exiting.", name_space_id);
-                    return;
-                    }
-                    //RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: service not available, waiting again...", name_space_id);
-                    }*/
-
+                    
+                    // SEND THE REQUEST 
                     using ServiceResponseFuture =
                     rclcpp::Client<gbeam2_interfaces::srv::GraphUpdate>::SharedFutureWithRequest;
 
                     auto response_received_callback =
                     [node = this](ServiceResponseFuture future) -> void {
                         auto request_response = future.get();
-                        node->merged_graph_pub_->publish(request_response.second->update_response); 
+                        //node->merged_graph_pub_->publish(request_response.second->update_response); 
+                        node->updateGlobalMap(request_response.second->update_response);
+                        node->merged_graph_pub_->publish(node->global_map); 
+                        // QUI MANDO SU MERGED GRAPH UNA MAPPA DI UN ALTRO DRONE
+                        // UPDATEGLOBALMAP 
+                        // publish Global map
+
+                        // Clear all the buffer for the requested id
                     };
                     
                     auto result_future = graph_updates_CLIENTS[i]->async_send_request(request_, std::move(response_received_callback));
@@ -349,6 +492,7 @@ private:
                     if (status == std::future_status::ready) {
                         //RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: Received response from %d",name_space_id,i);        
                         timers_CLIENTS[i]->reset();
+                        graphBuffer[i]->nodes.clear();
                     }
 
                     
@@ -368,54 +512,6 @@ private:
         
     }
 
-
-    gbeam2_interfaces::msg::Graph compareUpdates(
-        const std::shared_ptr<const gbeam2_interfaces::msg::Graph>& current_graph,
-        const std::shared_ptr<const gbeam2_interfaces::msg::Graph>& previous_graph)
-    {
-        gbeam2_interfaces::msg::Graph result;
-        int last_node_index = previous_graph->nodes.size();
-        int last_edge_index = previous_graph->edges.size();
-
-        // Reserve space for potential changes (this is a rough estimate)
-        result.nodes.reserve(current_graph->nodes.size() - last_node_index);
-        result.edges.reserve(current_graph->edges.size() - last_edge_index);
-    
-        // Check for modifications in existing NODES
-        for (int i = 0; i < last_node_index; ++i) {
-            if (hasVertexChanged(current_graph->nodes[i], previous_graph->nodes[i])) {
-                result.nodes.push_back(current_graph->nodes[i]);
-            }
-        }
-
-        // Add new nodes
-        result.nodes.insert(
-            result.nodes.end(),
-            std::make_move_iterator(current_graph->nodes.begin() + last_node_index),
-            std::make_move_iterator(current_graph->nodes.end())
-        );
-
-        // Check for modifications in existing EDGES
-        for (int i = 0; i < last_edge_index; ++i) {
-            if (hasEdgeChanged(current_graph->edges[i], previous_graph->edges[i])) {
-                result.edges.push_back(current_graph->edges[i]);
-            }
-        }
-
-        // Add new edges
-        result.edges.insert(
-            result.edges.end(),
-            std::make_move_iterator(current_graph->edges.begin() + last_edge_index),
-            std::make_move_iterator(current_graph->edges.end())
-        );
-
-        result.cluster_graph = current_graph->cluster_graph;
-        result.adj_matrix = current_graph->adj_matrix;
-        result.robot_id = current_graph->robot_id;
-
-
-        return result;
-    }
 };
 
 int main(int argc, char **argv)
