@@ -110,8 +110,6 @@ public:
     
 private:
 
-    
-
     double distance_exp;
     double reached_tol;
     double limit_xi, limit_xs, limit_yi, limit_ys;

@@ -29,7 +29,6 @@
 #include "std_msgs/msg/float32_multi_array.hpp"
 
 #include "gbeam2_interfaces/msg/status.hpp"
-#include "gbeam2_interfaces/msg/frontier_stamped.hpp"
 
 #include "gbeam2_interfaces/srv/graph_update.hpp"
 #include "library_fcn.hpp"

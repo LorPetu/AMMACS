@@ -35,6 +35,7 @@
 #include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
 #include "gbeam2_interfaces/msg/graph_cluster.hpp"
 #include "gbeam2_interfaces/srv/set_mapping_status.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
@@ -51,12 +52,7 @@
 #define INF 100000
 //-------------------------------------------------------------------------------------------------------------
 
-struct V_info
-{
-    int node_id;
-    double coeff;
-    int cluster_id;
-};
+
 
 
 
@@ -88,8 +84,11 @@ public:
         batch_values.data.resize(4);
         
         // SERVICE
-        status_server_ = this->create_service<gbeam2_interfaces::srv::SetMappingStatus>(
+        status_server_ = this->create_service<std_srvs::srv::SetBool>(
            "gbeam/set_mapping_status", std::bind(&GraphUpdateNode::setStatus, this, std::placeholders::_1, std::placeholders::_2));
+
+        clustering_service_ = this->create_service<std_srvs::srv::SetBool>(
+        "gbeam/start_cluster",std::bind(&GraphUpdateNode::changeClusterState,this, std::placeholders::_1, std::placeholders::_2));
 
         //Initialize parameters
         this->declare_parameter<double>("node_dist_min",0.0);
@@ -136,19 +135,6 @@ public:
 
     }    
 
-    // Declaration of the setStatus function
-    bool setStatus(
-        const std::shared_ptr<gbeam2_interfaces::srv::SetMappingStatus::Request> request,
-        std::shared_ptr<gbeam2_interfaces::srv::SetMappingStatus::Response> response)
-    {
-        RCLCPP_INFO(this->get_logger(),"setting status -------> done");
-        // Assuming mapping_status is a member variable of your GraphUpdateNode class
-        mapping_status = request->request;
-        response->response = true;
-
-        return true;
-   }
-
 private:
     bool mapping_status=false;
     double node_dist_min;
@@ -159,7 +145,6 @@ private:
     double max_lenght_edge;
 
     bool received_ext_nodes;
-
     
     double limit_xi, limit_xs, limit_yi, limit_ys;
 
@@ -185,19 +170,21 @@ private:
     std::vector<int> update_batch;
     bool start_batch=false;
 
+
     gbeam2_interfaces::msg::GraphCluster Graphclusters;
     std::unordered_map<int, int> node_to_cluster;
     std::unordered_map<int, double> node_to_coeff;
     gbeam2_interfaces::msg::GraphCluster louvain_Com;
     std::unordered_map<int, int> ClusterNode_to_comm;
     std::unordered_map<int, double> ClusterNode_coeff;
-    std::vector<V_info> unclustered_nodes;
+
 
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr graph_pub_;
     rclcpp::Publisher<gbeam2_interfaces::msg::GraphCluster>::SharedPtr clusters_pub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr poly_sub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::GraphUpdate>::SharedPtr external_poly_sub_;
-    rclcpp::Service<gbeam2_interfaces::srv::SetMappingStatus>::SharedPtr status_server_;
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr status_server_;
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr clustering_service_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr batch_values_pub_;
     std_msgs::msg::Float32MultiArray batch_values;
     
@@ -531,6 +518,25 @@ private:
         }
 
 
+    }
+
+    // Declaration of the setStatus function
+    void setStatus(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+        std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+    {
+        RCLCPP_INFO(this->get_logger(),"setting status -------> done");
+        mapping_status = request->data;
+        response->success = true;
+        response->message = "Starting Mapping...";
+   }
+    
+    void changeClusterState(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+        std::shared_ptr<std_srvs::srv::SetBool::Response> response){
+        
+        if(request->data){
+            cluster_state = 2;
+            response->success=true;
+        }
     }
 
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::GraphUpdate> ext_updates){
@@ -1038,7 +1044,12 @@ private:
                 if(avg_degree>min_avg_degree*0.5 && V_1 > N_vert_min && gamma_1>gamma_min*0.5) cluster_state=2;
             } else{
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=2;
+               
             } 
+
+           
+
+            
 
             int N_clusters = cluster_adj_matrix.size();
             cluster_adj_matrix.assign(N_clusters, std::vector<float>(N_clusters, 0.0f)); 
@@ -1233,7 +1244,7 @@ private:
             // }
 
             // Inizialization: Readapt cluster mapping to describe global commmunities 
-            // unclustered_nodes.clear();
+
 
             // Inizialization: Populate the GraphCluster weight matrix 
             // We want to identify all the edges INSIDE the cluster to make them self loop on a global level 
@@ -1352,7 +1363,7 @@ private:
             update_batch.clear();
             cluster_state=0;
             louvain_Com.clusters.clear();
-            unclustered_nodes.clear();
+
             node_to_cluster.clear();
             node_to_coeff.clear();
             ClusterNode_coeff.clear();
