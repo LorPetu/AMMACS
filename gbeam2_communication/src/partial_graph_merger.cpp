@@ -316,7 +316,7 @@ private:
                 auto incoming = node;
                 auto actual = mod_graph.nodes[node.id];
                 //update old ones with all the features (cluster_id, gain...)
-                RCLCPP_INFO(this->get_logger(), "OLD Node id: %d of robot%d updated by robot%d",node.id,node.belong_to,req_robot_id);
+                //RCLCPP_INFO(this->get_logger(), "OLD Node id: %d of robot%d updated by robot%d",node.id,node.belong_to,req_robot_id);
 
                 if(req_robot_id==name_space_id){
                     // In this case I'm receiving update by myself (from graph update) 
@@ -349,7 +349,7 @@ private:
             else{
                 // adding new nodes
                 nodes_added ++;
-                RCLCPP_INFO(this->get_logger(), "NEW Node id: %d of robot%d added",node.id,req_robot_id);
+                //RCLCPP_INFO(this->get_logger(), "NEW Node id: %d of robot%d added",node.id,req_robot_id);
                 //RCLCPP_INFO(this->get_logger(), "Add new node %d", node.id);
                 mod_graph.nodes.push_back(node);
                 if(req_robot_id==name_space_id) add_to_update = true;
@@ -377,12 +377,12 @@ private:
 
         }
 
-        RCLCPP_INFO(this->get_logger(), "Add %d NEW nodes to the graph of robot%d", nodes_added, graph_received.robot_id);
-        RCLCPP_INFO(this->get_logger(), "Explored %d nodes in my graph by robot%d", nodes_explored_by_other, graph_received.robot_id);
-        RCLCPP_INFO(this->get_logger(), "Explored %d nodes in my graph", nodes_explored);
+        RCLCPP_INFO(this->get_logger(), "Update:: Add %d NEW nodes to the graph of robot%d", nodes_added, graph_received.robot_id);
+        RCLCPP_INFO(this->get_logger(), "Global:: Explored %d nodes in my graph by robot%d", nodes_explored_by_other, graph_received.robot_id);
+        RCLCPP_INFO(this->get_logger(), "Map   :: Explored %d nodes in my graph", nodes_explored);
 
         for (int i = 0; i < N_robot; i++){
-            if (i!=name_space_id) RCLCPP_INFO(this->get_logger(),"BUFFER[%d] nodes_size: %d", i,graphBuffer[i]->nodes.size());
+            if (i!=name_space_id) RCLCPP_INFO(this->get_logger(),"UGM:: BUFFER[%d] nodes_size: %d", i,graphBuffer[i]->nodes.size());
             }
         global_map.last_updater = req_robot_id;
         
@@ -397,7 +397,7 @@ private:
             if(name_space_id==req_robot_id) return;
             std::unique_lock<std::mutex> lock(mutex_);
             //RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Service call received from %d", name_space_id, req_robot_id);
-            RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
+            RCLCPP_INFO(this->get_logger(), "SERVER [%d]:: I'm receiving %ld nodes from: %d", name_space_id, request->update_request.nodes.size(), request->update_request.robot_id);
 
             std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character
             std::string source_frame = "robot"+ std::to_string(req_robot_id) + "/odom"; 
@@ -413,16 +413,17 @@ private:
             // Publish the fake polygon
             gbeam2_interfaces::msg::GraphUpdate updates;
             updates.bridges = request->update_request.cluster_graph.bridges;
+            updates.robot_id = req_robot_id;
 
             // Prepare and publish the fake polygon
             if(!request->update_request.nodes.empty()){
                 for(int n=request->update_request.nodes.size()-1;n>=add_after_id && n>=0;n--){
-                updates.new_nodes.push_back(vert_transform(request->update_request.nodes[n],getTransform(target_frame,source_frame)));
-            }
+                    updates.new_nodes.push_back(vert_transform(request->update_request.nodes[n],getTransform(target_frame,source_frame)));
+                }
             }
                     
 
-            //RCLCPP_INFO(this->get_logger(), "-->I'm sending %ld nodes from: %d", fake_poly.polygon.vertices_reachable.size(), fake_poly.robot_id);
+            RCLCPP_INFO(this->get_logger(), "SERVER[%d]-->I'm sending %ld nodes from: %d", name_space_id, updates.new_nodes.size(), req_robot_id);
             external_updates_pub_->publish(updates);
 
             // Wait for the update to be processed with a timeout
@@ -431,13 +432,13 @@ private:
 
             if (status) {
                 // Data from Graph update received within the timeout period
-
+                RCLCPP_INFO(this->get_logger(),"SERVER[%d]: UpdateGlobalMap with my graph processed considering also last nodes of %d",name_space_id, req_robot_id);
                 updateGlobalMap(request->update_request);
                 last_update_node_with[req_robot_id]=(request->update_request.nodes.empty())? -1: request->update_request.nodes.back().id;
 
                 
                 response->success = updateResponse.success;
-                //RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Data received from %d has been processed by graph_update", name_space_id, req_robot_id);
+                RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Data received from %d has been processed by graph_update", name_space_id, req_robot_id);
             
             } else {
                 // Timeout occurred
@@ -460,6 +461,7 @@ private:
     {   
         std::lock_guard<std::mutex> lock(mutex_); 
 
+        RCLCPP_INFO(this->get_logger(), "SWITCH:: UpdateGlobalMap last updated by...", graph->last_updater_id);
         updateGlobalMap(*graph);
         
         if (graph->last_updater_id != name_space_id) {
@@ -470,11 +472,11 @@ private:
             updateResponse.success = true;
             data_received_ = true;
             cv_.notify_one();
-            RCLCPP_INFO(this->get_logger(), "Processing update considering nodes from %d...", graph->last_updater_id);
+            RCLCPP_INFO(this->get_logger(), "SWITCH:: Processing update considering nodes from %d...", graph->last_updater_id);
         } else {
 
             /// My own map has been computed considering also external nodes just received 
-            RCLCPP_INFO(this->get_logger(), "Publishing on my own topic... %s", (is_gain_updated) ? "with the gain updated" : "no gain updated");
+            RCLCPP_INFO(this->get_logger(), "SWITCH:: Publishing on my own topic... %s", (is_gain_updated) ? "with the gain updated" : "no gain updated");
             is_gain_updated=false;
         }
 
@@ -498,7 +500,7 @@ private:
                 if(trigger_time> lb_time && trigger_time<up_time){
                     //send a request
 
-                    //RCLCPP_INFO(this->get_logger(),"CLIENT[%d]: Send a request to %ld ...",name_space_id,i);
+                    RCLCPP_INFO(this->get_logger(),"CLIENT[%d]: Send a request to %ld with %d nodes ...",name_space_id,i,graphBuffer[i]->nodes.size());
 
                     std::shared_ptr<gbeam2_interfaces::srv::GraphUpdate::Request> request_ = std::make_shared<gbeam2_interfaces::srv::GraphUpdate::Request>();
 
@@ -517,6 +519,7 @@ private:
                     [node = this](ServiceResponseFuture future) -> void {
                         auto request_response = future.get();
                         //node->merged_graph_pub_->publish(request_response.second->update_response); 
+                        RCLCPP_INFO(node->get_logger(), "CLIENT[%d]:: Update global Map with received update from %d", node->name_space_id,request_response.second->update_response.robot_id);
                         node->updateGlobalMap(request_response.second->update_response);
                         node->merged_graph_pub_->publish(node->global_map); 
                         // QUI MANDO SU MERGED GRAPH UNA MAPPA DI UN ALTRO DRONE
@@ -531,7 +534,7 @@ private:
                     
                     std::future_status status = result_future.wait_for(2s);  // timeout to guarantee a graceful finish
                     if (status == std::future_status::ready) {
-                        //RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: Received response from %d",name_space_id,i);        
+                        RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: Received response from %d",name_space_id,i);        
                         timers_CLIENTS[i]->reset();
                         graphBuffer[i]->nodes.clear();
                     }

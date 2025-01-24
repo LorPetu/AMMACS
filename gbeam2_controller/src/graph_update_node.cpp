@@ -546,6 +546,9 @@ private:
 
         external_nodes2.insert(external_nodes2.end(),ext_updates->new_nodes.begin(),ext_updates->new_nodes.end());
         external_nodes.polygon.vertices_reachable = external_nodes2;
+        RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_nodes2.size());
+
+        external_nodes.robot_id = ext_updates->robot_id;
         external_bridges = ext_updates->bridges;
 
         received_ext_nodes = true;
