@@ -543,8 +543,11 @@ private:
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::GraphUpdate> ext_updates){
         // Each time i receive external nodes I store them 
         if(!mapping_status) mapping_status=true;
-        external_nodes = ext_updates->poly_ext;
+
+        external_nodes2.insert(external_nodes2.end(),ext_updates->new_nodes.begin(),ext_updates->new_nodes.end());
+        external_nodes.polygon.vertices_reachable = external_nodes2;
         external_bridges = ext_updates->bridges;
+
         received_ext_nodes = true;
     }
 

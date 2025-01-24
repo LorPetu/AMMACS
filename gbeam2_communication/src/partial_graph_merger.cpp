@@ -239,27 +239,33 @@ private:
         // RCLCPP_INFO(this->get_logger(), "Status received");
 
         // Check connection status 
-        //if(name_space_id!=status->robot_id || status->connection_status[name_space_id]!=1) return;
+        if(status->connection_status[name_space_id]!=1) return;
 
         double node_dist_open = 0.3; //node_dist_open: 0.3
         // Update exploration gain based on the position and the current occupied cluster
+        if(global_map.map[status->current_cluster.belong_to].nodes.empty()) return;
         std::lock_guard<std::mutex> lock(mutex_); //is needed for simultaneous access to common resource?
         for (int id :status->current_cluster.nodes)
-        {
-            auto& node = global_map.map[status->current_cluster.belong_to].nodes[id];
+        {   
+            if(id>global_map.map[status->current_cluster.belong_to].nodes.size()) continue;
+
+            gbeam2_interfaces::msg::Vertex node = global_map.map[status->current_cluster.belong_to].nodes[id];
             auto& pos = status->current_position.pose.pose.position;
             double dist = sqrt(pow(node.x-pos.x, 2) + pow(node.y-pos.y, 2));
             if (dist < node_dist_open)
             {
                 node.gain = 0;
                 node.is_visited = true;
-                
+                bool is_present = false;
                 // RCLCPP_INFO(this->get_logger(), "I want to update the gain of node id: %d cluster: %d of robot%d",
                 //     node.id,node.cluster_id,node.belong_to);
                 if(status->current_cluster.belong_to==name_space_id){
                     global_map.map[name_space_id].nodes[node.id]=node;
                 }else{
-                    graphBuffer[status->robot_id]->nodes.push_back(node);
+                     for(auto buff_node : graphBuffer[status->current_cluster.belong_to]->nodes){
+                            if(buff_node.belong_to==node.belong_to && buff_node.id==node.id) is_present=true;
+                        }
+                        if(!is_present) graphBuffer[status->current_cluster.belong_to]->nodes.push_back(node);
                 }
                 
                 
@@ -286,6 +292,16 @@ private:
         prev_graph.cluster_graph = graph_received.cluster_graph;
         prev_graph.adj_matrix = graph_received.adj_matrix;
         prev_graph.length_matrix = graph_received.length_matrix;
+
+        if(req_robot_id==name_space_id){
+            for (int i = 0; i < N_robot; i++){
+                
+                graphBuffer[i]->cluster_graph = graph_received.cluster_graph;
+                graphBuffer[i]->adj_matrix = graph_received.adj_matrix;
+                graphBuffer[i]->length_matrix = graph_received.length_matrix;
+
+            }
+        }
     
         // Update node for each graph update received
         // They can be mine (exploration gain update) among old ones
@@ -294,35 +310,39 @@ private:
 
         for(gbeam2_interfaces::msg::Vertex node: graph_received.nodes){
             auto& mod_graph = global_map.map[node.belong_to];
+            bool add_to_update=false;
             
             if(node.id<=last_update_node_with[node.belong_to]){
-                double incoming_gain = node.gain;
-                double actual_gain = mod_graph.nodes[node.id].gain;
+                auto incoming = node;
+                auto actual = mod_graph.nodes[node.id];
                 //update old ones with all the features (cluster_id, gain...)
                 RCLCPP_INFO(this->get_logger(), "OLD Node id: %d of robot%d updated by robot%d",node.id,node.belong_to,req_robot_id);
 
                 if(req_robot_id==name_space_id){
                     // In this case I'm receiving update by myself (from graph update) 
                     // For sure the incoming gain will be greater because is never modified in graph_update
-                    if(incoming_gain>actual_gain){
+                    if(incoming.gain>actual.gain){
                         nodes_explored++;
-                        mod_graph.cluster_graph.clusters[node.cluster_id].total_gain -= incoming_gain; 
-                    }   
+                        mod_graph.cluster_graph.clusters[node.cluster_id].total_gain -= incoming.gain; 
+                        add_to_update = true;
+                    }  
+                    add_to_update = (incoming.cluster_id!=actual.cluster_id && incoming.cluster_id!=-1);
+                    add_to_update = (incoming.neighbors.size()>actual.neighbors.size());
 
                 }else{
                     // If instead we're receiving external updates we could have two situation
                     if (node.belong_to==name_space_id){
                         // I'm receiving updates regarding my nodes that has been explored by someone else
-                        if(incoming_gain<actual_gain){
+                        if(incoming.gain<actual.gain){
                             nodes_explored_by_other++;
-                            mod_graph.cluster_graph.clusters[node.cluster_id].total_gain -= actual_gain; 
+                            mod_graph.cluster_graph.clusters[node.cluster_id].total_gain -= actual.gain; 
                         }
                     }else{
                         // I'm receving general updates by the req_robot
                     }                   
 
                 }
-                node.gain = (incoming_gain<actual_gain) ? incoming_gain : actual_gain;
+                node.gain = (incoming.gain<actual.gain) ? incoming.gain : actual.gain;
 
                 mod_graph.nodes[node.id]=node;                          
             }
@@ -332,21 +352,38 @@ private:
                 RCLCPP_INFO(this->get_logger(), "NEW Node id: %d of robot%d added",node.id,req_robot_id);
                 //RCLCPP_INFO(this->get_logger(), "Add new node %d", node.id);
                 mod_graph.nodes.push_back(node);
-                for (int i = 0; i < N_robot; i++)
-                {
-                    if (i!=name_space_id) {
-                       graphBuffer[req_robot_id]->nodes.push_back(node);
-                    }
-                }
+                if(req_robot_id==name_space_id) add_to_update = true;
+                
                 
                 
             }
+
+            if(add_to_update){
+                for (int i = 0; i < N_robot; i++){
+                    bool is_present = false; 
+                    if (i!=name_space_id){
+                        
+                        for(auto buff_node : graphBuffer[i]->nodes){
+                            if(buff_node.belong_to==node.belong_to && buff_node.id==node.id) is_present=true;
+                        }
+                        if(!is_present) graphBuffer[i]->nodes.push_back(node);
+                    } 
+                    
+                    }
+            }
+
+            
+
 
         }
 
         RCLCPP_INFO(this->get_logger(), "Add %d NEW nodes to the graph of robot%d", nodes_added, graph_received.robot_id);
         RCLCPP_INFO(this->get_logger(), "Explored %d nodes in my graph by robot%d", nodes_explored_by_other, graph_received.robot_id);
         RCLCPP_INFO(this->get_logger(), "Explored %d nodes in my graph", nodes_explored);
+
+        for (int i = 0; i < N_robot; i++){
+            if (i!=name_space_id) RCLCPP_INFO(this->get_logger(),"BUFFER[%d] nodes_size: %d", i,graphBuffer[i]->nodes.size());
+            }
         global_map.last_updater = req_robot_id;
         
     }
@@ -360,20 +397,14 @@ private:
             if(name_space_id==req_robot_id) return;
             std::unique_lock<std::mutex> lock(mutex_);
             //RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Service call received from %d", name_space_id, req_robot_id);
-            //RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
+            RCLCPP_INFO(this->get_logger(), "I'm receiving %ld nodes from: %d", request->update_request.nodes.size(), request->update_request.robot_id);
 
             std::string target_frame = name_space.substr(1, name_space.length()-1) + "/odom"; //becasue lookupTransform doesn't allow "/" as first character
             std::string source_frame = "robot"+ std::to_string(req_robot_id) + "/odom"; 
 
+
+            int add_after_id = last_update_node_with[req_robot_id];
             // Update the global map with the information just received
-            updateGlobalMap(request->update_request);
-
-            // Prepare and publish the fake polygon
-            auto [transformed_graph, fake_poly] = graph_transform_and_get_fakepoly(request->update_request,getTransform(target_frame,source_frame));
-            fake_poly.robot_id = req_robot_id;
-            fake_poly.header.frame_id = target_frame;
-
-            //RCLCPP_INFO(this->get_logger(), "-->I'm sending %ld nodes from: %d", fake_poly.polygon.vertices_reachable.size(), fake_poly.robot_id);
             
             // Reset flags and prepare for new update
             data_received_ = false;
@@ -381,8 +412,17 @@ private:
             
             // Publish the fake polygon
             gbeam2_interfaces::msg::GraphUpdate updates;
-            updates.poly_ext =fake_poly;
             updates.bridges = request->update_request.cluster_graph.bridges;
+
+            // Prepare and publish the fake polygon
+            if(!request->update_request.nodes.empty()){
+                for(int n=request->update_request.nodes.size()-1;n>=add_after_id && n>=0;n--){
+                updates.new_nodes.push_back(vert_transform(request->update_request.nodes[n],getTransform(target_frame,source_frame)));
+            }
+            }
+                    
+
+            //RCLCPP_INFO(this->get_logger(), "-->I'm sending %ld nodes from: %d", fake_poly.polygon.vertices_reachable.size(), fake_poly.robot_id);
             external_updates_pub_->publish(updates);
 
             // Wait for the update to be processed with a timeout
@@ -391,10 +431,11 @@ private:
 
             if (status) {
                 // Data from Graph update received within the timeout period
-                //RCLCPP_INFO(this->get_logger(),"Update response success: %d (false is:%d)",updateResponse.success, false);
-                response->update_response = *curr_updateBuffer[req_robot_id];
 
-                prev_updateBuffer[req_robot_id]=curr_updateBuffer[req_robot_id];
+                updateGlobalMap(request->update_request);
+                last_update_node_with[req_robot_id]=(request->update_request.nodes.empty())? -1: request->update_request.nodes.back().id;
+
+                
                 response->success = updateResponse.success;
                 //RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Data received from %d has been processed by graph_update", name_space_id, req_robot_id);
             
@@ -464,7 +505,7 @@ private:
                     // PREPARE THE REQUEST 
                     // request_->update_request = *curr_updateBuffer[i];                    
                     // prev_updateBuffer[i]=curr_updateBuffer[i];
-                    request_->update_request = *graphBuffer[i];                    
+                    request_->update_request = *graphBuffer[i];                   
                   
 
                     
