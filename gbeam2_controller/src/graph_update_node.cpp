@@ -97,6 +97,7 @@ public:
         this->declare_parameter<double>("obstacle_margin",0.0);
         this->declare_parameter<double>("safe_dist",0.0);
         this->declare_parameter<double>("max_lenght_edge",0.0);
+        this->declare_parameter<int>("N_robot",0);
         
         //Exploration limits
         this->declare_parameter<double>("limit_xi",0.0);
@@ -120,6 +121,8 @@ public:
         limit_xs = this->get_parameter("limit_xs").get_parameter_value().get<double>();
         limit_yi = this->get_parameter("limit_yi").get_parameter_value().get<double>();
         limit_ys = this->get_parameter("limit_ys").get_parameter_value().get<double>();
+
+        N_robot = this->get_parameter("N_robot").get_parameter_value().get<int>();
       
         RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF GRAPH_UPDATE: ############# ");
         RCLCPP_INFO(this->get_logger(),"############# (for %s) ############# ",name_space.c_str());
@@ -132,6 +135,9 @@ public:
         RCLCPP_INFO(this->get_logger(),"7) LIMIT_XS: %f", limit_xs);
         RCLCPP_INFO(this->get_logger(),"8) LIMIT_YI: %f", limit_yi);
         RCLCPP_INFO(this->get_logger(),"9) LIMIT_YS: %f", limit_ys);
+        RCLCPP_INFO(this->get_logger(),"10) N_robot: %d", N_robot);
+
+        node_ext_index.resize(N_robot);
 
     }    
 
@@ -143,6 +149,7 @@ private:
     double obstacle_margin;
     double safe_dist;
     double max_lenght_edge;
+    int N_robot;
 
     bool received_ext_nodes;
     
@@ -154,13 +161,13 @@ private:
     std::string name_space;
     int name_space_id;
 
-    gbeam2_interfaces::msg::FreePolygonStamped external_nodes;
-    std::vector<gbeam2_interfaces::msg::Vertex> external_nodes2;
     std::vector<gbeam2_interfaces::msg::Bridge> external_bridges;
     std::vector<gbeam2_interfaces::msg::Bridge> candidates_bridges;
     int N_bridges=0;
 
     gbeam2_interfaces::msg::Graph graph;
+    gbeam2_interfaces::msg::Graph external_graph;
+    std::vector<std::unordered_map<int,int>> node_ext_index; 
     std::vector<gbeam2_interfaces::msg::Vertex> new_reach_node;
     int E_new=0; //new added edges
     int V_new=0; //new just added edges
@@ -539,16 +546,51 @@ private:
             response->success=true;
         }
     }
+    
+    void printUnorderedMap(const rclcpp::Logger& logger, const std::unordered_map<int, int>& map,  const std::string& map_name = "UnorderedMap") {
+      std::ostringstream oss;
+      oss << map_name << ": {";
+
+      for (const auto& pair : map) {
+          oss << pair.first << ": " << pair.second << ", ";
+      }
+
+      std::string map_string = oss.str();
+      // Remove trailing comma and space, if the map is not empty
+      if (!map.empty()) {
+          map_string.pop_back();
+          map_string.pop_back();
+      }
+
+      map_string += "}";
+      RCLCPP_INFO(logger, "%s", map_string.c_str());
+    }
 
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::GraphUpdate> ext_updates){
         // Each time i receive external nodes I store them 
         if(!mapping_status) mapping_status=true;
 
-        external_nodes2.insert(external_nodes2.end(),ext_updates->new_nodes.begin(),ext_updates->new_nodes.end());
-        external_nodes.polygon.vertices_reachable = external_nodes2;
-        RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_nodes2.size());
+        // Devo solo usare un elenco di nodi
 
-        external_nodes.robot_id = ext_updates->robot_id;
+        if(!ext_updates->new_nodes.empty()){
+            for(auto node: ext_updates->new_nodes){
+
+                auto it = node_ext_index[node.belong_to].find(node.id);
+                if(it!= node_ext_index[node.belong_to].end()){
+                    //If i have already the node in my external graph update it.
+                    external_graph.nodes[node_ext_index[node.belong_to][node.id]] = node;
+                }else{
+                    //If i have NOT the node in my external graph add it.
+                    node_ext_index[node.belong_to][node.id] = external_graph.nodes.size();
+                    external_graph.nodes.push_back(node);
+                }
+                
+            }
+        }
+        
+        RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_graph.nodes.size());
+        //printUnorderedMap(this->get_logger(),node_ext_index[ext_updates->robot_id]);
+        external_graph.robot_id = ext_updates->robot_id;
         external_bridges = ext_updates->bridges;
 
         received_ext_nodes = true;
@@ -591,16 +633,13 @@ private:
         
         //std::is_empty<gbeam2_interfaces::msg::FreePolygonStamped>
         if(received_ext_nodes){
-            graph.last_updater_id = external_nodes.robot_id;
+            graph.last_updater_id = external_graph.robot_id;
             is_changed = true;
-            RCLCPP_INFO(this->get_logger(), "I received some nodes from %d!", external_nodes.robot_id);
+            //RCLCPP_INFO(this->get_logger(), "I received some nodes from %d!", external_nodes.robot_id);
 
         } else {
             graph.last_updater_id = name_space_id;
         }
-
-        gbeam2_interfaces::msg::Graph fake_graph;
-        fake_graph.nodes = external_nodes.polygon.vertices_reachable;
 
 
         // ####################################################
@@ -620,13 +659,13 @@ private:
 
             /// ####### NEW PART FOR COMMUNICATION ############
             float vert_ext_dist; 
-            int vert_ext_id;
-            if(external_nodes.polygon.vertices_reachable.size()!=0){
-                
-                auto temp_pair = vert_graph_distance_noobstacle(fake_graph, vert);
+            gbeam2_interfaces::msg::Vertex vert_ext;
+            if(external_graph.nodes.size()!=0){
+                // Return the distance and the id 
+                auto temp_pair = vert_graph_distance_noobstacle(external_graph, vert);
                 vert_ext_dist = temp_pair.first;
-                vert_ext_id = temp_pair.second;
-                //RCLCPP_INFO(this->get_logger(),"My REACHABLE vertex %d has node %d of robot%d %f distant", i, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+                vert_ext = temp_pair.second;
+                //RCLCPP_INFO(this->get_logger(),"My REACHABLE vertex %d has node %d of robot%d %f distant", i, vert_ext.id,external_graph.robot_id, vert_ext_dist);
 
             }
             else{
@@ -648,16 +687,16 @@ private:
             addNode(graph,vert); //add vertex to the graph
            
             
-            if(vert_ext_dist<=max_lenght_edge && fake_graph.nodes[vert_ext_id].cluster_id!=-1){ // Candidate bridge with external nodes
+            if(vert_ext_dist<=max_lenght_edge && vert_ext.cluster_id!=-1){ // Candidate bridge with external nodes
                 gbeam2_interfaces::msg::Bridge temp_bridge;
                 temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
                 temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
                 vert.gain=0;
-                auto ext_vert =fake_graph.nodes[vert_ext_id];
-                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+                
+                temp_bridge.v2 = vert_ext.id; temp_bridge.c2 = vert_ext.cluster_id; temp_bridge.r2 = vert_ext.belong_to; 
 
-                temp_bridge.direction.x = ext_vert.x - vert.x;
-                temp_bridge.direction.y = ext_vert.y - vert.y;
+                temp_bridge.direction.x = vert_ext.x - vert.x;
+                temp_bridge.direction.y = vert_ext.y - vert.y;
                 temp_bridge.direction.z = 0;
                 float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
                 temp_bridge.direction.x /= norm;
@@ -698,9 +737,9 @@ private:
             /// ####### NEW PART FOR COMMUNICATION ############
             float vert_ext_dist; 
             if(received_ext_nodes && external_nodes.polygon.vertices_obstacles.size()!=0){
-                gbeam2_interfaces::msg::Graph fake_graph;
-                fake_graph.nodes = external_nodes.polygon.vertices_obstacles;
-                vert_ext_dist = vert_graph_distance_noobstacle(fake_graph, vert);
+                gbeam2_interfaces::msg::Graph external_graph;
+                external_graph.nodes = external_nodes.polygon.vertices_obstacles;
+                vert_ext_dist = vert_graph_distance_noobstacle(external_graph, vert);
             }
             else{
                 vert_ext_dist = INF;
@@ -743,12 +782,12 @@ private:
 
             /// ####### NEW PART FOR COMMUNICATION ############
             float vert_ext_dist; 
-            int vert_ext_id;
-            if(external_nodes.polygon.vertices_reachable.size()!=0){ // Compare its own inside nodes with external one (only reacheable)
-                auto temp_pair = vert_graph_distance_noobstacle(fake_graph, vert);
+            gbeam2_interfaces::msg::Vertex vert_ext;
+            if(external_graph.nodes.size()!=0){ // Compare its own inside nodes with external one (only reacheable)
+                auto temp_pair = vert_graph_distance_noobstacle(external_graph, vert);
                 vert_ext_dist = temp_pair.first;
-                vert_ext_id = temp_pair.second;
-                //RCLCPP_INFO(this->get_logger(),"My INSIDE vertex %d has node %d of robot%d %f distant", i, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+                vert_ext = temp_pair.second;
+                //RCLCPP_INFO(this->get_logger(),"My INSIDE vertex %d has node %d of robot%d %f distant", i, vert_ext.id,vert_ext.belong_to, vert_ext_dist);
 
             }
             else{
@@ -767,17 +806,16 @@ private:
             }
             addNode(graph,vert); //add vertex to the graph
             
-            if(vert_ext_dist<=max_lenght_edge && fake_graph.nodes[vert_ext_id].cluster_id!=-1){ // Candidate bridge with external nodes
+            if(vert_ext_dist<=max_lenght_edge && vert_ext.cluster_id!=-1){ // Candidate bridge with external nodes
                 gbeam2_interfaces::msg::Bridge temp_bridge;
                 temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
                 temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
                 vert.gain=0;
-            
-                auto ext_vert =fake_graph.nodes[vert_ext_id];
-                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
 
-                temp_bridge.direction.x = ext_vert.x - vert.x;
-                temp_bridge.direction.y = ext_vert.y - vert.y;
+                temp_bridge.v2 = vert_ext.id; temp_bridge.c2 = vert_ext.cluster_id; temp_bridge.r2 = vert_ext.belong_to; 
+
+                temp_bridge.direction.x = vert_ext.x - vert.x;
+                temp_bridge.direction.y = vert_ext.y - vert.y;
                 temp_bridge.direction.z = 0;
                 float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
                 temp_bridge.direction.x /= norm;
@@ -1434,7 +1472,7 @@ private:
 
             if(received_ext_nodes){
                 //Take all external bridges and check if there's any already existing 
-                RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_nodes.robot_id);
+                RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_graph.robot_id);
                 for(auto& ext_bridge : external_bridges){
                     if(ext_bridge.belong_to!=name_space_id){
                         // Check if adding this bridge is needed
@@ -1458,7 +1496,7 @@ private:
                     it->c1 = graph.nodes[it->v1].cluster_id;
                     // Check if walkable, if the two end are inside reachable polygon
                     // Could be enough to check only external end?
-                    if(isInsideReachable(poly_ptr->polygon,fake_graph.nodes[it->v2])&&
+                    if(isInsideReachable(poly_ptr->polygon,external_graph.nodes[node_ext_index[it->r2][it->v2]])&&
                                 isInsideReachable(poly_ptr->polygon,graph.nodes[it->v1])){
                                 it->is_walkable = true; 
                                 it->id = N_bridges; N_bridges++;

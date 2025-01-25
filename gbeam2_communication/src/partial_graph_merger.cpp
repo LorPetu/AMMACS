@@ -410,16 +410,39 @@ private:
             data_received_ = false;
             updateResponse.success = false;
             
-            // Publish the fake polygon
+            // Publish the external graph updates
             gbeam2_interfaces::msg::GraphUpdate updates;
             updates.bridges = request->update_request.cluster_graph.bridges;
             updates.robot_id = req_robot_id;
 
-            // Prepare and publish the fake polygon
-            if(!request->update_request.nodes.empty()){
-                for(int n=request->update_request.nodes.size()-1;n>=add_after_id && n>=0;n--){
-                    updates.new_nodes.push_back(vert_transform(request->update_request.nodes[n],getTransform(target_frame,source_frame)));
-                }
+            // // Prepare and publish the fake polygon
+            // if(!request->update_request.nodes.empty()){
+            //     for(int n=request->update_request.nodes.size()-1;n>=add_after_id && n>=0;n--){
+            //         updates.new_nodes.push_back(vert_transform(request->update_request.nodes[n],getTransform(target_frame,source_frame)));
+            //     }
+            // }
+
+            for(gbeam2_interfaces::msg::Vertex node: request->update_request.nodes){
+                bool add_to_update=false;
+                // avoid sending back my own node received by someone else
+                if(node.belong_to!=name_space_id){
+                    if(node.id<=last_update_node_with[node.belong_to]){
+                   
+                        // Send to graph update only old ones with changed cluster
+                        if(node.cluster_id!=global_map.map[node.belong_to].nodes[node.id].cluster_id){
+                            add_to_update =true;
+                        }
+                            
+                   
+                    }
+                    else{
+                        // adding new node                    
+                        add_to_update = true;
+                         
+                    }
+                }    
+                if(add_to_update) updates.new_nodes.push_back(vert_transform(node,getTransform(target_frame,source_frame)));
+                        
             }
                     
 

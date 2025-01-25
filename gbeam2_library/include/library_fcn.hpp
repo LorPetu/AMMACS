@@ -144,7 +144,7 @@ float dist(gbeam2_interfaces::msg::Vertex v, geometry_msgs::msg::PointStamped p)
 float vert_graph_distance(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v);
 
 // compute minimum distance between vertex v and obstacle graph nodes
-std::pair<float,int> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v);
+std::pair<float,gbeam2_interfaces::msg::Vertex> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v);
 
 // compute minimum distance between vertex v and reachable graph nodes
 float vert_graph_distance_obstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v);

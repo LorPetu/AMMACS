@@ -457,10 +457,10 @@ float vert_graph_distance(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces
 }
 
 // compute minimum distance between vertex v and graph nodes
-std::pair<float,int> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v)
+std::pair<float,gbeam2_interfaces::msg::Vertex> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v)
 {
   float d_min = INF;
-  int id_min = -1;
+  gbeam2_interfaces::msg::Vertex vert = gbeam2_interfaces::msg::Vertex();
   for (int i=0; i<graph.nodes.size(); i++)
   {
     if(!graph.nodes[i].is_obstacle)
@@ -468,11 +468,11 @@ std::pair<float,int> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Grap
       float d = dist(graph.nodes[i], v);
       if (d < d_min){
         d_min = d;
-        id_min = graph.nodes[i].id;
+        vert = graph.nodes[i];
       }
     }
   }
-  return std::make_pair(d_min,id_min);
+  return std::make_pair(d_min,vert);
 }
 
 // compute minimum distance between vertex v and graph nodes

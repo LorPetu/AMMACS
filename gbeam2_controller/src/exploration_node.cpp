@@ -278,10 +278,9 @@ private:
             // Inizialization, node is just started
             // Get the node on which i am
             // Here we assume that at first the enumeration of local and global is the same
-            auto [dist, id] = vert_graph_distance_noobstacle(graph,getCurrPos()); 
-            curr_vertex = graph.nodes[id];
+            auto [dist, curr_vertex] = vert_graph_distance_noobstacle(graph,getCurrPos()); 
             last_target_vertex = curr_vertex;
-            last_target = id;
+            last_target = curr_vertex.id;
             //RCLCPP_INFO(this->get_logger(), "INIT: I am on the node with id: global:%d", id);        
         }else{
             // We need to get the local enumaration of the last_target_vertex
