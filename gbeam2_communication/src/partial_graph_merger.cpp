@@ -259,13 +259,13 @@ private:
                 bool is_present = false;
                 // RCLCPP_INFO(this->get_logger(), "I want to update the gain of node id: %d cluster: %d of robot%d",
                 //     node.id,node.cluster_id,node.belong_to);
-                if(status->current_cluster.belong_to==name_space_id){
+                if(node.belong_to==name_space_id){
                     global_map.map[name_space_id].nodes[node.id]=node;
                 }else{
-                     for(auto buff_node : graphBuffer[status->current_cluster.belong_to]->nodes){
+                     for(auto buff_node : graphBuffer[node.belong_to]->nodes){
                             if(buff_node.belong_to==node.belong_to && buff_node.id==node.id) is_present=true;
                         }
-                        if(!is_present) graphBuffer[status->current_cluster.belong_to]->nodes.push_back(node);
+                        if(!is_present) graphBuffer[node.belong_to]->nodes.push_back(node);
                 }
                 
                 
@@ -323,7 +323,11 @@ private:
                     // For sure the incoming gain will be greater because is never modified in graph_update
                     if(incoming.gain>actual.gain){
                         nodes_explored++;
-                        mod_graph.cluster_graph.clusters[node.cluster_id].total_gain -= incoming.gain; 
+                        mod_graph.cluster_graph.clusters[incoming.cluster_id].total_gain -= incoming.gain;
+                         
+                        auto& unexpl_nodes = mod_graph.cluster_graph.clusters[incoming.cluster_id].unexplored_nodes;
+                       
+                        unexpl_nodes.erase(std::remove(unexpl_nodes.begin(), unexpl_nodes.end(), incoming.id), unexpl_nodes.end());
                         add_to_update = true;
                     }  
                     add_to_update = (incoming.cluster_id!=actual.cluster_id && incoming.cluster_id!=-1);
@@ -335,7 +339,11 @@ private:
                         // I'm receiving updates regarding my nodes that has been explored by someone else
                         if(incoming.gain<actual.gain){
                             nodes_explored_by_other++;
-                            mod_graph.cluster_graph.clusters[node.cluster_id].total_gain -= actual.gain; 
+                            mod_graph.cluster_graph.clusters[incoming.cluster_id].total_gain -= incoming.gain;
+                         
+                            auto& unexpl_nodes = mod_graph.cluster_graph.clusters[incoming.cluster_id].unexplored_nodes;
+                        
+                            unexpl_nodes.erase(std::remove(unexpl_nodes.begin(), unexpl_nodes.end(), incoming.id), unexpl_nodes.end());
                         }
                     }else{
                         // I'm receving general updates by the req_robot
@@ -458,7 +466,8 @@ private:
                 RCLCPP_INFO(this->get_logger(),"SERVER[%d]: UpdateGlobalMap with my graph processed considering also last nodes of %d",name_space_id, req_robot_id);
                 updateGlobalMap(request->update_request);
                 last_update_node_with[req_robot_id]=(request->update_request.nodes.empty())? -1: request->update_request.nodes.back().id;
-
+                // MANCAVA UPDATE RESPONSE
+                response->update_response = *graphBuffer[req_robot_id];
                 
                 response->success = updateResponse.success;
                 RCLCPP_INFO(this->get_logger(), "SERVER [%d]: Data received from %d has been processed by graph_update", name_space_id, req_robot_id);

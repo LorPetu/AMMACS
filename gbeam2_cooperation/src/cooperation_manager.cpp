@@ -704,6 +704,8 @@ private:
     }
 
     gbeam2_interfaces::msg::Graph assigned_graph = getAssignedGraph(clusters_ids);
+
+    //printMatrix(this->get_logger(),GraphAdj2matrix(assigned_graph.length_matrix));
       
     // Create a goal message
     auto goal_msg = Task::Goal();

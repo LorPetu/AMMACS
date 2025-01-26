@@ -588,7 +588,7 @@ private:
             }
         }
         
-        RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_graph.nodes.size());
+       //RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_graph.nodes.size());
         //printUnorderedMap(this->get_logger(),node_ext_index[ext_updates->robot_id]);
         external_graph.robot_id = ext_updates->robot_id;
         external_bridges = ext_updates->bridges;
@@ -705,9 +705,9 @@ private:
                 is_changed=true;
               
 
-                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
-                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+                //RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            // temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                                                            // temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
             }
 
            
@@ -824,9 +824,9 @@ private:
                 is_changed=true;
               
 
-                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
-                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+                //RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            // temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                                                            // temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
             }
             if(vert.is_reachable) new_reach_node.push_back(vert);
             
@@ -853,11 +853,13 @@ private:
                 int e_ij = new_adj_matrix[i][j];
                 if(e_ij!=-1){
                     weight_adj_matrix[i][j] = 1/graph.edges[e_ij].length;
+                    weight_adj_matrix[j][i] = 1/graph.edges[e_ij].length;
                     lenght_adj_matrix[i][j] = graph.edges[e_ij].length;
+                    lenght_adj_matrix[j][i] = graph.edges[e_ij].length;
                 } 
                 else{
                     weight_adj_matrix[i][j] = 0.0;
-                    lenght_adj_matrix[i][j] = INF;
+                    lenght_adj_matrix[i][j] = -1.0;
                 }
                 m+= weight_adj_matrix[i][j];
             }
@@ -960,7 +962,7 @@ private:
             }
         }*/
         
-
+        //printMatrix(this->get_logger(),lenght_adj_matrix);
         graph.adj_matrix=matrix2GraphAdj(new_adj_matrix);
         graph.length_matrix = matrix2GraphAdj(lenght_adj_matrix);
 
@@ -1239,7 +1241,7 @@ private:
             if (max_iterations >= 10) {
                 RCLCPP_WARN(this->get_logger(), "Maximum iterations reached without convergence.");
             } else {
-                RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
+                //RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
             }
 
             // for(auto& comm:louvain_Com.clusters){
@@ -1472,7 +1474,7 @@ private:
 
             if(received_ext_nodes){
                 //Take all external bridges and check if there's any already existing 
-                RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_graph.robot_id);
+               //RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_graph.robot_id);
                 for(auto& ext_bridge : external_bridges){
                     if(ext_bridge.belong_to!=name_space_id){
                         // Check if adding this bridge is needed
@@ -1502,9 +1504,9 @@ private:
                                 it->id = N_bridges; N_bridges++;
                                 it->belong_to = name_space_id;                               
                                 Graphclusters.bridges.push_back(*it);
-                                RCLCPP_INFO(this->get_logger(),"ADD BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            it->v1, it->c1, it->r1,
-                                                            it->v2, it->c2, it->r2, it->length);
+                               //RCLCPP_INFO(this->get_logger(),"ADD BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            // it->v1, it->c1, it->r1,
+                                                            // it->v2, it->c2, it->r2, it->length);
                                 it = candidates_bridges.erase(it);
                                 } else{
                                     it++;

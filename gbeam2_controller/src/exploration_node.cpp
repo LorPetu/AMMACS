@@ -137,6 +137,37 @@ private:
     
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr  pos_ref_publisher_;
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_subscriber_;
+
+    void printMatrix(rclcpp::Logger logger, const std::vector<std::vector<float>> &matrix, const std::string &matrix_name = "Matrix") {
+    RCLCPP_INFO(logger, "Printing %s:", matrix_name.c_str());
+    
+    // Determine the maximum width for each column
+    std::vector<size_t> column_widths;
+        for (const auto& row : matrix) {
+            if (row.size() > column_widths.size()) {
+                column_widths.resize(row.size(), 0);
+            }
+            for (size_t j = 0; j < row.size(); ++j) {
+                std::ostringstream temp;
+                temp << std::fixed << std::setprecision(2) << row[j];
+                column_widths[j] = std::max(column_widths[j], temp.str().size());
+            }
+        }
+
+        // Print each row with formatted spacing
+        for (size_t i = 0; i < matrix.size(); ++i) {
+            std::ostringstream row_stream;
+            row_stream << "[ ";
+            for (size_t j = 0; j < matrix[i].size(); ++j) {
+                row_stream << std::setw(column_widths[j]) << std::fixed << std::setprecision(2) << matrix[i][j];
+                if (j < matrix[i].size() - 1) {
+                    row_stream << ", ";
+                }
+            }
+            row_stream << " ]";
+            RCLCPP_INFO(logger, "Row %zu: %s", i, row_stream.str().c_str());
+        }
+    }
     
     void logIntVector(rclcpp::Logger logger, const std::vector<int>& vec, const std::string& vec_name = "vector") {
         std::ostringstream oss;
@@ -154,19 +185,21 @@ private:
     std::pair<float,std::vector<int>>  dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
     {
     int N = graph.nodes.size();
-    int E = graph.adj_matrix.size;
-    auto adjMatrix = graph.adj_matrix.data;
-    int N_matrix = graph.adj_matrix.size;
+    auto adjMatrix = graph.length_matrix.data;
+    int N_matrix = graph.length_matrix.size;
 
     // Since we're considering only reachable node we skip the filtering part.
 
-    std::vector<double> dist(N, INF);
+    std::vector<float> dist(N, INF);
     std::vector<int> parent(N, -1); // To store the shortest path tree
     std::priority_queue<std::pair<double, int>, std::vector<std::pair<double, int>>, std::greater<>> pq;
 
-    dist[s] = 0;
-    pq.push({0, s});
+    //printMatrix(this->get_logger(),GraphAdj2matrix(graph.length_matrix));
 
+    dist[s] = 0.0;
+    pq.push({0.0, s});
+
+    RCLCPP_INFO(this->get_logger(),"Dijkstra:: algorithm inizialization");
 
     while (!pq.empty()) {
             auto [currentDist, u] = pq.top();
@@ -179,9 +212,10 @@ private:
 
             // Explore neighbors
             for (int v = 0; v < N; v++) {
-            int v_id = graph.nodes[v].id;
-                double weight = adjMatrix[u_id*N_matrix + v_id]; // adj.data[i * N + j] = matrix[i][j];
-                if (weight > 0 && dist[u] + weight < dist[v]) {
+                if(v==u) continue;
+                int v_id = graph.nodes[v].id;
+                float weight = adjMatrix[u_id*N_matrix + v_id]; // adj.data[i * N + j] = matrix[i][j];
+                if (weight > 0.0 && dist[u] + weight < dist[v]) {
                     dist[v] = dist[u] + weight;
                     parent[v] = u;
                     pq.push({dist[v], v});
@@ -287,7 +321,7 @@ private:
             for(int n=0; n<graph.nodes.size();n++){
                 if(graph.nodes[n].id == last_target_vertex.id && graph.nodes[n].belong_to == last_target_vertex.belong_to){
                     last_target = n;
-                    //RCLCPP_INFO(this->get_logger(),"Last target node was n: %d id: %d",last_target, last_target_vertex.id);
+                    RCLCPP_INFO(this->get_logger(),"execute:: Last target node was n: %d id: %d",last_target, last_target_vertex.id);
                     break;
                 }
             }
@@ -304,6 +338,7 @@ private:
         }else{
             // Client doesn't specify any particular target node, just need to explore a cluster
             // At start select the best node and compute the path to it
+            RCLCPP_INFO(this->get_logger(),"execute:: Search for the best Node");
 
             auto bestpair = getBestNode(goal->cluster_id_task);
 
@@ -438,7 +473,6 @@ private:
         float max_reward = 0.0;
         int best_node = -1;
         std::vector<int> bestPath;
-        std::vector<float> dist(N, INF);
 
 
         for(size_t n = 0; n < N; n++)
@@ -451,9 +485,9 @@ private:
                     continue;  
                 }
                 auto [distance, path] =  dijkstraWithAdj(graph,last_target,n);
-                logIntVector(this->get_logger(),path,"Path to"+std::to_string(n));
-                float reward = 100*graph.nodes[n].gain / std::pow(distance, distance_exp);
-                RCLCPP_INFO(this->get_logger(),"Node %d: id: %d reward: %f", n, graph.nodes[n].id,reward);
+                logIntVector(this->get_logger(),path,"getBestNode:: Path to "+std::to_string(n));
+                float reward = graph.nodes[n].gain / std::pow(distance, distance_exp);
+                RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d reward: %f distance:%f", n, graph.nodes[n].id,reward, distance);
                 if(reward > max_reward)
                 {
                     max_reward = reward;
@@ -464,11 +498,11 @@ private:
         }
 
         if(best_node<0){
-            RCLCPP_WARN(this->get_logger(),"No best node has been found");
+            RCLCPP_WARN(this->get_logger(),"getBestNode:: No best node has been found");
             return std::make_pair(last_target,std::vector<int>());;
         }
 
-        RCLCPP_INFO(this->get_logger(), "Best node -> local id: %d global id: %d", best_node, graph.nodes[best_node].id);
+        RCLCPP_INFO(this->get_logger(), "getBestNode:: Best node -> local id: %d global id: %d", best_node, graph.nodes[best_node].id);
 
         return std::make_pair(best_node,bestPath);
     }

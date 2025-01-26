@@ -79,6 +79,7 @@ public:
      curr_status[i].joint_vector.resize(N_robot);
      curr_status[i].normal_joint_vector.resize(N_robot);
   }
+  curr_status[name_space_id].connection_status[name_space_id] = 1;
 
  
 
