@@ -356,6 +356,17 @@ private:
         //RCLCPP_INFO(this->get_logger(), "Local Path : %s", local_path_str.c_str());
         //RCLCPP_INFO(this->get_logger(), "Global Path: %s", global_path_str.c_str());
 
+        if(path.empty()){
+            // Modify here the result information
+            result->last_reached = curr_vertex;
+            result->task_completed = task_completed;
+            goal_handle->abort(result);
+            active_goal_handle_ = nullptr; // Clear the active goal
+            RCLCPP_INFO(this->get_logger(), "Goal cannot be completed - empty path to local node %d",local_target);
+            return;
+        
+        }
+
         last_target_vertex = graph.nodes[local_target];
         intermediate_target_vertex = (path.size()>1) ? graph.nodes[path[1]]: last_target_vertex;
 

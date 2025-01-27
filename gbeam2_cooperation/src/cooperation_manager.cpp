@@ -244,6 +244,7 @@ private:
   }
 
   void statusCallback(const gbeam2_interfaces::msg::Status::SharedPtr received_status){
+    if(received_status->connection_status[name_space_id]!=1) return;
     last_status[received_status->robot_id]=*received_status;
     if(!start_coop) return;
 
@@ -472,7 +473,7 @@ private:
 
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
 
-      if(GlobalClusters.clusters[i].nodes.size()<3) continue; // Skip small clusters that can be merged TODO
+      if(GlobalClusters.clusters[i].nodes.size()<3 || GlobalClusters.clusters[i].total_gain==0.0) continue; // Skip small clusters that can be merged TODO
 
       //      if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
         //RCLCPP_INFO(this->get_logger(),"cluster: %d Start searching for best cluster",i);
