@@ -1498,8 +1498,8 @@ private:
                     it->c1 = graph.nodes[it->v1].cluster_id;
                     // Check if walkable, if the two end are inside reachable polygon
                     // Could be enough to check only external end?
-                    if(isInsideReachable(poly_ptr->polygon,external_graph.nodes[node_ext_index[it->r2][it->v2]])&&
-                                isInsideReachable(poly_ptr->polygon,graph.nodes[it->v1])){
+                    if(isInsideReachable(polyGlobal,external_graph.nodes[node_ext_index[it->r2][it->v2]])&&
+                                isInsideReachable(polyGlobal,graph.nodes[it->v1])){
                                 it->is_walkable = true; 
                                 it->id = N_bridges; N_bridges++;
                                 it->belong_to = name_space_id;                               
