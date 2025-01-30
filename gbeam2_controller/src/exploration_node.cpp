@@ -59,6 +59,8 @@ public:
 
         pos_ref_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
             "gbeam/gbeam_pos_ref", 1);
+        target_ref_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+        "gbeam/target_pos_ref", 1);
     
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -136,6 +138,7 @@ private:
     bool task_completed = false;
     
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr  pos_ref_publisher_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr target_ref_publisher_;
     rclcpp::Subscription<gbeam2_interfaces::msg::Graph>::SharedPtr graph_subscriber_;
 
     void printMatrix(rclcpp::Logger logger, const std::vector<std::vector<float>> &matrix, const std::string &matrix_name = "Matrix") {
@@ -199,7 +202,7 @@ private:
     dist[s] = 0.0;
     pq.push({0.0, s});
 
-    RCLCPP_INFO(this->get_logger(),"Dijkstra:: algorithm inizialization");
+    //RCLCPP_INFO(this->get_logger(),"Dijkstra:: algorithm inizialization");
 
     while (!pq.empty()) {
             auto [currentDist, u] = pq.top();
@@ -302,6 +305,7 @@ private:
         int traspassed_bridges = 0;
         bool has_target_bridge = goal->has_target_bridge;
         geometry_msgs::msg::PoseStamped pos_ref;
+        geometry_msgs::msg::PoseStamped target_ref;
         
         auto feedback = std::make_shared<Task::Feedback>();        
         auto result = std::make_shared<Task::Result>();
@@ -317,7 +321,7 @@ private:
             last_target = curr_vertex.id;
             //RCLCPP_INFO(this->get_logger(), "INIT: I am on the node with id: global:%d", id);        
         }else{
-            // We need to get the local enumaration of the last_target_vertex
+            // We need to get the local enumeration of the last_target_vertex
             for(int n=0; n<graph.nodes.size();n++){
                 if(graph.nodes[n].id == last_target_vertex.id && graph.nodes[n].belong_to == last_target_vertex.belong_to){
                     last_target = n;
@@ -338,7 +342,7 @@ private:
         }else{
             // Client doesn't specify any particular target node, just need to explore a cluster
             // At start select the best node and compute the path to it
-            RCLCPP_INFO(this->get_logger(),"execute:: Search for the best Node");
+            //RCLCPP_INFO(this->get_logger(),"execute:: Search for the best Node");
 
             auto bestpair = getBestNode(goal->cluster_id_task);
 
@@ -346,6 +350,12 @@ private:
             path            =   bestpair.second;
             
         }
+
+        // Publish position reference to controller
+        target_ref.pose.position = vertex2point(graph.nodes[local_target]);
+        target_ref.pose.position.z = mapping_z;
+        target_ref.header.frame_id = name_space.substr(1, name_space.length()-1) + "/odom";
+        target_ref_publisher_->publish(target_ref);
 
         std::string local_path_str, global_path_str;
         for (int node : path) {
@@ -490,15 +500,15 @@ private:
         {
             if(n!=last_target)
             {
-                if(graph.nodes[n].cluster_id!=cluster_id){
+                if(graph.nodes[n].cluster_id!=cluster_id && graph.nodes[n].gain>0.0){
                     //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d", n, graph.nodes[n].id,cluster_id);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue;  
                 }
                 auto [distance, path] =  dijkstraWithAdj(graph,last_target,n);
-                logIntVector(this->get_logger(),path,"getBestNode:: Path to "+std::to_string(n));
+                //logIntVector(this->get_logger(),path,"getBestNode:: Path to "+std::to_string(n));
                 float reward = graph.nodes[n].gain / std::pow(distance, distance_exp);
-                RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d reward: %f distance:%f", n, graph.nodes[n].id,reward, distance);
+                //RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d reward: %f distance:%f", n, graph.nodes[n].id,reward, distance);
                 if(reward > max_reward)
                 {
                     max_reward = reward;

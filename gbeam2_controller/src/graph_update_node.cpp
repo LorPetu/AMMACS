@@ -73,6 +73,8 @@ public:
 
         graph_pub_ =this->create_publisher<gbeam2_interfaces::msg::Graph>(
           "gbeam/reachability_graph",1);
+        external_graph_pub_ =this->create_publisher<sensor_msgs::msg::PointCloud2>(
+          "gbeam/external_graph",1);
 
         clusters_pub_ =this->create_publisher<gbeam2_interfaces::msg::GraphCluster>(
           "gbeam/clusters",1);
@@ -188,6 +190,7 @@ private:
 
 
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr graph_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr external_graph_pub_;
     rclcpp::Publisher<gbeam2_interfaces::msg::GraphCluster>::SharedPtr clusters_pub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr poly_sub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::GraphUpdate>::SharedPtr external_poly_sub_;
@@ -528,12 +531,29 @@ private:
 
     }
 
+    gbeam2_interfaces::msg::Bridge createCandidateBridge(const gbeam2_interfaces::msg::Vertex int_vert,const gbeam2_interfaces::msg::Vertex ext_vert, float vert_ext_dist){
+        gbeam2_interfaces::msg::Bridge temp_bridge;
+            temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
+            temp_bridge.v1 = int_vert.id; temp_bridge.c1 = int_vert.cluster_id; temp_bridge.r1 = name_space_id;
+    
+            temp_bridge.v2 = ext_vert.id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = ext_vert.belong_to; 
+
+            temp_bridge.direction.x = ext_vert.x - int_vert.x;
+            temp_bridge.direction.y = ext_vert.y - int_vert.y;
+            temp_bridge.direction.z = 0;
+            float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
+            temp_bridge.direction.x /= norm;
+            temp_bridge.direction.y /= norm;
+            
+            return temp_bridge;
+    }
+
     // Declaration of the setStatus function
     void setStatus(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
         std::shared_ptr<std_srvs::srv::SetBool::Response> response)
     {
         RCLCPP_INFO(this->get_logger(),"setting status -------> done");
-        mapping_status = request->data;
+        mapping_status = true;
         response->success = true;
         response->message = "Starting Mapping...";
    }
@@ -588,11 +608,52 @@ private:
             }
         }
         
-       //RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_graph.nodes.size());
+        RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_graph.nodes.size());
         //printUnorderedMap(this->get_logger(),node_ext_index[ext_updates->robot_id]);
         external_graph.robot_id = ext_updates->robot_id;
         external_bridges = ext_updates->bridges;
 
+        // DEBUG CLOUDPOINT 
+        // Prepare the PointCloud2 message
+        sensor_msgs::msg::PointCloud2 external_nodes_pointcloud;
+        external_nodes_pointcloud.header.frame_id = name_space.substr(1, name_space.length()-1) + "/odom" ;
+        //external_nodes_pointcloud.header.stamp =  tf2::TimePointZero;
+
+
+        // Reserve space for the points and the additional "side" field
+        external_nodes_pointcloud.height = 1;                  // Unordered point cloud (1D array)
+        external_nodes_pointcloud.is_dense = false;            // Allow for possible invalid points
+        int total_points = external_graph.nodes.size();
+        external_nodes_pointcloud.width = total_points;        // Number of points
+
+        // Define the PointCloud2 fields
+        sensor_msgs::PointCloud2Modifier modifier(external_nodes_pointcloud);
+        modifier.setPointCloud2Fields(3,  // Number of fields: x, y, z, and side
+            "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+            "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+            "z", 1, sensor_msgs::msg::PointField::FLOAT32); 
+
+        modifier.resize(total_points);  // Resize the point cloud to accommodate all points
+
+        // Use iterators for better handling of PointCloud2
+        sensor_msgs::PointCloud2Iterator<float> iter_x(external_nodes_pointcloud, "x");
+        sensor_msgs::PointCloud2Iterator<float> iter_y(external_nodes_pointcloud, "y");
+        sensor_msgs::PointCloud2Iterator<float> iter_z(external_nodes_pointcloud, "z");
+            
+        for(auto& vert:external_graph.nodes){
+
+            *iter_x = vert.x;
+            *iter_y = vert.y;
+            *iter_z = vert.z;
+            
+            
+            ++iter_x;
+            ++iter_y;
+            ++iter_z;
+
+        }
+
+        external_graph_pub_->publish(external_nodes_pointcloud);
         received_ext_nodes = true;
     }
 
@@ -641,6 +702,9 @@ private:
             graph.last_updater_id = name_space_id;
         }
 
+        //compute polygon in global coordinates
+        gbeam2_interfaces::msg::FreePolygon polyGlobal = poly_transform(poly_ptr->polygon, l2g_tf);
+
 
         // ####################################################
         // ####### ---------- ADD GRAPH NODES --------- #######
@@ -687,27 +751,17 @@ private:
             addNode(graph,vert); //add vertex to the graph
            
             
-            if(vert_ext_dist<=max_lenght_edge && vert_ext.cluster_id!=-1){ // Candidate bridge with external nodes
-                gbeam2_interfaces::msg::Bridge temp_bridge;
-                temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
-                temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
-                vert.gain=0;
+            if(vert_ext_dist<=max_lenght_edge*1.5){ // Candidate bridge with external nodes
                 
-                temp_bridge.v2 = vert_ext.id; temp_bridge.c2 = vert_ext.cluster_id; temp_bridge.r2 = vert_ext.belong_to; 
+                auto temp_bridge = createCandidateBridge(vert,vert_ext,vert_ext_dist);
+                if(isInsideReachable(polyGlobal,vert_ext)&& isInsideReachable(polyGlobal,vert)) temp_bridge.is_walkable=true;
 
-                temp_bridge.direction.x = vert_ext.x - vert.x;
-                temp_bridge.direction.y = vert_ext.y - vert.y;
-                temp_bridge.direction.z = 0;
-                float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
-                temp_bridge.direction.x /= norm;
-                temp_bridge.direction.y /= norm;
                 candidates_bridges.push_back(temp_bridge);
                 is_changed=true;
-              
 
-                //RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            // temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
-                                                            // temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
             }
 
            
@@ -806,27 +860,17 @@ private:
             }
             addNode(graph,vert); //add vertex to the graph
             
-            if(vert_ext_dist<=max_lenght_edge && vert_ext.cluster_id!=-1){ // Candidate bridge with external nodes
-                gbeam2_interfaces::msg::Bridge temp_bridge;
-                temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
-                temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
-                vert.gain=0;
+            if(vert_ext_dist<=max_lenght_edge){ // Candidate bridge with external nodes && vert_ext.cluster_id!=-1
+                auto temp_bridge = createCandidateBridge(vert,vert_ext,vert_ext_dist);
+                if(isInsideReachable(polyGlobal,vert_ext)&& isInsideReachable(polyGlobal,vert)) temp_bridge.is_walkable=true;
 
-                temp_bridge.v2 = vert_ext.id; temp_bridge.c2 = vert_ext.cluster_id; temp_bridge.r2 = vert_ext.belong_to; 
-
-                temp_bridge.direction.x = vert_ext.x - vert.x;
-                temp_bridge.direction.y = vert_ext.y - vert.y;
-                temp_bridge.direction.z = 0;
-                float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
-                temp_bridge.direction.x /= norm;
-                temp_bridge.direction.y /= norm;
                 candidates_bridges.push_back(temp_bridge);
                 is_changed=true;
               
 
-                //RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            // temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
-                                                            // temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+                RCLCPP_INFO(this->get_logger(),"Candidate INTERNAL BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
             }
             if(vert.is_reachable) new_reach_node.push_back(vert);
             
@@ -872,8 +916,7 @@ private:
         // ####### ---------- ADD GRAPH EDGES --------- #######
         // ####################################################
         
-        //compute polygon in global coordinates
-        gbeam2_interfaces::msg::FreePolygon polyGlobal = poly_transform(poly_ptr->polygon, l2g_tf);
+
 
         //create vectors with indices of vertices inside polytopes
         std::vector<int> inReachableId;
@@ -1493,27 +1536,42 @@ private:
                 }
             }
 
+            int b=0;
+            int b_norm=0;
+
+            RCLCPP_INFO(this->get_logger(),"Size of candidate bridge %d",candidates_bridges.size());
+
             for (auto it = candidates_bridges.begin();it !=candidates_bridges.end();){
-                if(graph.nodes[it->v1].cluster_id!=-1){
-                    it->c1 = graph.nodes[it->v1].cluster_id;
-                    // Check if walkable, if the two end are inside reachable polygon
-                    // Could be enough to check only external end?
-                    if(isInsideReachable(polyGlobal,external_graph.nodes[node_ext_index[it->r2][it->v2]])&&
-                                isInsideReachable(polyGlobal,graph.nodes[it->v1])){
-                                it->is_walkable = true; 
-                                it->id = N_bridges; N_bridges++;
-                                it->belong_to = name_space_id;                               
-                                Graphclusters.bridges.push_back(*it);
-                               //RCLCPP_INFO(this->get_logger(),"ADD BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            // it->v1, it->c1, it->r1,
-                                                            // it->v2, it->c2, it->r2, it->length);
-                                it = candidates_bridges.erase(it);
-                                } else{
-                                    it++;
-                                }
-                                                
+                //RCLCPP_INFO(this->get_logger(),"access bridge index: %d",b);
+                auto& end1 = (it->r1!=name_space_id) ? external_graph.nodes[node_ext_index[it->r1][it->v1]] : graph.nodes[it->v1];
+                auto& end2 = (it->r2!=name_space_id) ? external_graph.nodes[node_ext_index[it->r2][it->v2]] : graph.nodes[it->v2];
+                
+                if(end1.cluster_id!=-1 && end2.cluster_id!=-1){
+                    // Check if the two end change their clustering
+                    it->c1 = end1.cluster_id;
+                    it->c2 = end2.cluster_id;
+
+                    if(it->is_walkable){
+                        it->id = N_bridges; N_bridges++;
+                        it->belong_to = name_space_id;                               
+                        Graphclusters.bridges.push_back(*it);
+                        it = candidates_bridges.erase(it);
+                        b++;
+                    } else if(isInsideReachable(polyGlobal,end1) && isInsideReachable(polyGlobal,end2)){
+                                    it->id = N_bridges; N_bridges++;
+                                    it->belong_to = name_space_id;                               
+                                    Graphclusters.bridges.push_back(*it);
+                                    it = candidates_bridges.erase(it);
+                                    b++;
+                    } else {
+                        it++;
+                        b_norm++;
+                        b++;
+                    }
                 } else{
                     it++;
+                    b_norm++;
+                    b++;
                 }
                 
             }

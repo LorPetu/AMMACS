@@ -474,6 +474,7 @@ private:
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
 
       if(GlobalClusters.clusters[i].nodes.size()<3 || GlobalClusters.clusters[i].total_gain==0.0) continue; // Skip small clusters that can be merged TODO
+      if(GlobalClusters.clusters[i].belong_to!=name_space_id) continue; // PROVVISORIO
 
       //      if (std::find(cluster.nodes.begin(), cluster.nodes.end(), neighbor_id) != cluster.nodes.end()) {
         //RCLCPP_INFO(this->get_logger(),"cluster: %d Start searching for best cluster",i);
@@ -496,7 +497,7 @@ private:
       
     }
 
-    //RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: %d - average reward: %f - %d clusters away",best_cluster_id, best_reward, best_path.size());
+    RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: %d - average reward: %f - %d clusters away",best_cluster_id, best_reward, best_path.size());
 
     std::string path_str;
     for (int node : best_path) {
@@ -549,16 +550,16 @@ private:
 
         }else{
           // I have no cluster at all or I didn't already compute one
-          //RCLCPP_INFO(this->get_logger(),"I have no cluster at all or I didn't already compute one");
+          RCLCPP_INFO(this->get_logger(),"I have no cluster at all or I didn't already compute one");
           if(stored_Graph->map[name_space_id].nodes.size()>4){
-            //RCLCPP_INFO(this->get_logger(),"I have some nodes but they don't compose a cluster yet");
+            RCLCPP_INFO(this->get_logger(),"I have some nodes but they don't compose a cluster yet");
           }
           else{
             int curr_cl_id = getCurrentCluster(robot_pos);
             if(curr_cl_id!=-1){
               auto curr_cl = GlobalClusters.clusters[curr_cl_id];
 
-              //RCLCPP_INFO(this->get_logger(),"I'm in global cluster %d --> id: %d belong to: %d",curr_cl_id,curr_cl.cluster_id,curr_cl.belong_to);
+              RCLCPP_INFO(this->get_logger(),"I'm in global cluster %d --> id: %d belong to: %d",curr_cl_id,curr_cl.cluster_id,curr_cl.belong_to);
               AreaDivision_isrequired=true;
             }
 
@@ -586,7 +587,7 @@ private:
           for (auto id : clusters_to_send) {
               path_str += std::to_string(id) + "-";
           }
-      //RCLCPP_INFO(this->get_logger(), "BEST CLUSTER: Path computed with adj is: %s", path_str.c_str());
+      RCLCPP_INFO(this->get_logger(), "BEST CLUSTER: Path computed with adj is: %s", path_str.c_str());
 
       // is the current cluster the best? 
       // BEST CLUSTER SEARCH 
@@ -597,21 +598,21 @@ private:
        
         ////RCLCPP_INFO(this->get_logger(),"Global cluster array is ok:");
         if(best_cl.belong_to!=name_space_id){
-          //RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
+          RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
           
           AreaDivision_isrequired = true;
           
         }else{          
           last_selected_cluster_id = best_cl_id;
           last_selected_cluster = best_cl;
-          //RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
+          RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
           
 
           send_goal(clusters_to_send,last_selected_cluster,false);
           
         }
       }else{
-        //RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster_id);
+        RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster_id);
         send_goal(clusters_to_send,last_selected_cluster,false);
       }
       
@@ -640,6 +641,8 @@ private:
     
     //assigned_graph_pub_->publish(getAssignedGraph(clusters_to_send));
   }
+
+  
 
   // Action routines
 
