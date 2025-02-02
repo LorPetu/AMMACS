@@ -608,7 +608,7 @@ private:
             }
         }
         
-        RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_graph.nodes.size());
+        //RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_graph.nodes.size());
         //printUnorderedMap(this->get_logger(),node_ext_index[ext_updates->robot_id]);
         external_graph.robot_id = ext_updates->robot_id;
         external_bridges = ext_updates->bridges;
@@ -759,9 +759,9 @@ private:
                 candidates_bridges.push_back(temp_bridge);
                 is_changed=true;
 
-                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
-                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+                // RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                //                                             temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                //                                             temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
             }
 
            
@@ -868,9 +868,9 @@ private:
                 is_changed=true;
               
 
-                RCLCPP_INFO(this->get_logger(),"Candidate INTERNAL BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
-                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+                // RCLCPP_INFO(this->get_logger(),"Candidate INTERNAL BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                //                                             temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                //                                             temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
             }
             if(vert.is_reachable) new_reach_node.push_back(vert);
             
@@ -1539,7 +1539,7 @@ private:
             int b=0;
             int b_norm=0;
 
-            RCLCPP_INFO(this->get_logger(),"Size of candidate bridge %d",candidates_bridges.size());
+            //RCLCPP_INFO(this->get_logger(),"Size of candidate bridge %d",candidates_bridges.size());
 
             for (auto it = candidates_bridges.begin();it !=candidates_bridges.end();){
                 //RCLCPP_INFO(this->get_logger(),"access bridge index: %d",b);

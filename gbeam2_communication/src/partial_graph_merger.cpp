@@ -293,15 +293,15 @@ private:
         int last_updater_id = graph_received.last_updater_id;
         // The requiring robot is the one that is sending updates or this robot itself that want to update its own map.
         // In the case of the robot itself (namespace) i can have req_robot_id!=namespace_id
-        RCLCPP_INFO(this->get_logger(),"Receiving robot%d graph last updated by %d updates",req_robot_id,last_updater_id);
+        //RCLCPP_INFO(this->get_logger(),"Receiving robot%d graph last updated by %d updates",req_robot_id,last_updater_id);
         auto& prev_graph = global_map.map[graph_received.robot_id];
         std::vector<int> last_added_node(N_robot, -1);  
         int nodes_added = 0;
         int nodes_explored = 0;
         int nodes_explored_by_other = 0;
 
-        RCLCPP_INFO(this->get_logger(), "Update global map with map of robot%d - BEFORE Last updated node: %d ", req_robot_id,last_update_node_with[req_robot_id]);
-        RCLCPP_INFO(this->get_logger(), "Size of received graph %d - Size of prev graph %d ", graph_received.nodes.size(),prev_graph.nodes.size());
+        //RCLCPP_INFO(this->get_logger(), "Update global map with map of robot%d - BEFORE Last updated node: %d ", req_robot_id,last_update_node_with[req_robot_id]);
+        //RCLCPP_INFO(this->get_logger(), "Size of received graph %d - Size of prev graph %d ", graph_received.nodes.size(),prev_graph.nodes.size());
 
         // Fixed things that i want to just be the same
         // Maybe cluster total gain could change here?
@@ -418,7 +418,7 @@ private:
             // if (i!=name_space_id) RCLCPP_INFO(this->get_logger(),"UGM:: BUFFER[%d] nodes_size: %d", i,graphBuffer[i]->nodes.size());
             last_update_node_with[i] = global_map.map[i].nodes.size();
 
-        RCLCPP_INFO(this->get_logger(), "Update global map with map of robot%d - AFTER Last updated node: %d ", i,last_update_node_with[i]);
+        //RCLCPP_INFO(this->get_logger(), "Update global map with map of robot%d - AFTER Last updated node: %d ", i,last_update_node_with[i]);
             }
         
         global_map.last_updater = req_robot_id;
@@ -440,7 +440,7 @@ private:
             std::string source_frame = "robot"+ std::to_string(req_robot_id) + "/odom"; 
 
            
-            RCLCPP_INFO(this->get_logger(),"PREPARE FEEDBACK:: received request size %d",request->update_request.nodes.size());
+            //RCLCPP_INFO(this->get_logger(),"PREPARE FEEDBACK:: received request size %d",request->update_request.nodes.size());
             
             // Reset flags and prepare for new update
             data_received_ = false;
@@ -479,13 +479,13 @@ private:
             // }
 
             // Update the global map with the information just received
-            RCLCPP_INFO(this->get_logger(),"UPDATE GLOBAL MAP IN SERVER CALLBACK - request->update_request");
+            //RCLCPP_INFO(this->get_logger(),"UPDATE GLOBAL MAP IN SERVER CALLBACK - request->update_request");
             updateGlobalMap(request->update_request);
 
             updates.new_nodes=global_map.map[request->update_request.robot_id].nodes;
                     
 
-            RCLCPP_INFO(this->get_logger(), "SERVER[%d]-->I'm sending %ld nodes from: %d", name_space_id, updates.new_nodes.size(), req_robot_id);
+            //RCLCPP_INFO(this->get_logger(), "SERVER[%d]-->I'm sending %ld nodes from: %d", name_space_id, updates.new_nodes.size(), req_robot_id);
             // publish the external feedback for graph_update_node
             external_updates_pub_->publish(updates);
 
@@ -524,7 +524,7 @@ private:
     {   
         std::lock_guard<std::mutex> lock(mutex_); 
 
-        RCLCPP_INFO(this->get_logger(),"UPDATE GLOBAL MAP IN SWITCH CALLBACK - my own graph");
+        //RCLCPP_INFO(this->get_logger(),"UPDATE GLOBAL MAP IN SWITCH CALLBACK - my own graph");
         updateGlobalMap(*graph);
         
         if (graph->last_updater_id != name_space_id) {
@@ -587,7 +587,7 @@ private:
                         //RCLCPP_INFO(node->get_logger(), "CLIENT[%d]:: Update global Map with received update from %d", node->name_space_id,request_response.second->update_response.robot_id);
                         // Update the Global Map with the updates received
                         
-                        RCLCPP_INFO(node->get_logger(),"UPDATE GLOBAL MAP IN CLIENT CALLBACK - request_response.second->update_response");
+                        //RCLCPP_INFO(node->get_logger(),"UPDATE GLOBAL MAP IN CLIENT CALLBACK - request_response.second->update_response");
                         node->updateGlobalMap(request_response.second->update_response);
 
                         // Prepare the external feedback for graph_update_node
@@ -623,7 +623,7 @@ private:
                                     
                         // }
 
-                        RCLCPP_INFO(node->get_logger(), "CLIENT[%d]-->I'm sending %ld nodes from: %d", node->name_space_id, updates.new_nodes.size(),updates.robot_id);
+                        //RCLCPP_INFO(node->get_logger(), "CLIENT[%d]-->I'm sending %ld nodes from: %d", node->name_space_id, updates.new_nodes.size(),updates.robot_id);
                         // publish the external feedback for graph_update_node
 
                         updates.new_nodes=node->global_map.map[updates.robot_id].nodes;
