@@ -282,6 +282,8 @@ private:
             }
         }
 
+        merged_graph_pub_->publish(global_map);
+
         is_gain_updated=true;
     }
 
@@ -312,6 +314,8 @@ private:
 
         if(req_robot_id==name_space_id){
             for (int i = 0; i < N_robot; i++){
+
+                // CLUSTERS GRAPH SHOULD BE UPDATED AS WELL OTHERWISE we will not receive any updates on that layer
                 
                 graphBuffer[i]->cluster_graph = graph_received.cluster_graph;
                 graphBuffer[i]->adj_matrix = graph_received.adj_matrix;

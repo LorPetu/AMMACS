@@ -251,6 +251,34 @@ private:
 
   }
 
+   void computeClusterProperties2(gbeam2_interfaces::msg::GraphClusterNode& it){
+        // Compute centroid and total gain for the pointer to the cluster
+        
+        //std::vector<gbeam2_interfaces::msg::GraphClusterNode, std::allocator<gbeam2_interfaces::msg::GraphClusterNode>>::iterator it
+        double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
+        double tot_gain=0.0;
+        for(auto& node_id:it.nodes){
+            auto node_gain = stored_Graph->map[it.belong_to].nodes[node_id].gain;
+            sum_x += stored_Graph->map[it.belong_to].nodes[node_id].x; //*node_gain;
+            sum_y += stored_Graph->map[it.belong_to].nodes[node_id].y; //*node_gain;
+            sum_z += stored_Graph->map[it.belong_to].nodes[node_id].z; //*node_gain;
+
+            tot_gain+=node_gain;
+        }
+        it.total_gain=tot_gain;
+        it.neighbours_centroids.clear();
+
+        int count = it.nodes.size();
+        
+        if (count>0){
+            it.centroid.x = sum_x / count; //tot_gain;
+            it.centroid.y = sum_y / count; //tot_gain;
+            it.centroid.z = sum_z / count; //tot_gain;
+
+        }
+        
+    }
+
   void mergedGraphCallback(const std::shared_ptr<gbeam2_interfaces::msg::GlobalMap> global_map_received){
     // This function creates the clusters layer graph considering all the cluster of all the map in global map
     // and it's executed every new updates of the global map.
@@ -290,6 +318,7 @@ private:
 
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
       auto& cl_i = GlobalClusters.clusters[i];
+      computeClusterProperties2(cl_i);
       cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id] = i;
     }
     //for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
@@ -323,7 +352,7 @@ private:
     GlobalClusters.bridges = stored_Graph->map[req_robot_id].cluster_graph.bridges;
     GlobalClusters.adj_matrix = matrix2GraphAdj(global_adj_matrix);
 
-    //printMatrix(this->get_logger(),global_adj_matrix);
+    printMatrix(this->get_logger(),global_adj_matrix);
 
     clusters_pub_->publish(GlobalClusters);
 
@@ -365,11 +394,11 @@ private:
         }
       }
       //RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Total nodes: %d",result.nodes.size());
-
-      result.adj_matrix = stored_Graph->map[name_space_id].adj_matrix;
-      result.length_matrix = stored_Graph->map[name_space_id].length_matrix;
+      auto res_robot_id = GlobalClusters.clusters[clusters_ids.back()].belong_to;
+      result.adj_matrix = stored_Graph->map[res_robot_id].adj_matrix;
+      result.length_matrix = stored_Graph->map[res_robot_id].length_matrix;
       // Assign the robot_id of the last cluster in the path
-      result.robot_id = GlobalClusters.clusters[clusters_ids.back()].belong_to;
+      result.robot_id = res_robot_id;
 
       return result;
   }

@@ -208,7 +208,7 @@ private:
 
     //RCLCPP_INFO(this->get_logger(),"Dijkstra:: algorithm inizialization");
 
-    while (!pq.empty()) {
+        while (!pq.empty()) {
             auto [currentDist, u] = pq.top();
             pq.pop();
 
@@ -230,6 +230,7 @@ private:
             }
         }
 
+        // Reconstruct path with strict group validation
         std::vector<int> path;
         for (int at = t; at != -1; at = parent[at]) {
             path.push_back(at);
@@ -325,10 +326,12 @@ private:
         
         auto feedback = std::make_shared<Task::Feedback>();        
         auto result = std::make_shared<Task::Result>();
-
+        
+        RCLCPP_INFO(this->get_logger(),"Execute goal: #################NEW GOAL################");
         RCLCPP_INFO(this->get_logger(),"Execute goal: explore cluster %d of robot%d",goal->cluster_id_task, goal->belong_to);
+        RCLCPP_INFO(this->get_logger(),"Execute goal: ########################################");
 
-        if(last_target<0 || local_target<0){
+        if(last_target<0){
             // Inizialization, node is just started or the previous action has been cancelled 
             // Get the node on which i am
             // Here we assume that at first the enumeration of local and global is the same
@@ -337,14 +340,25 @@ private:
             last_target = curr_vertex.id;
             //RCLCPP_INFO(this->get_logger(), "INIT: I am on the node with id: global:%d", id);        
         }else{
-            // We need to get the local enumeration of the last_target_vertex
-            for(int n=0; n<graph.nodes.size();n++){
-                if(graph.nodes[n].id == last_target_vertex.id && graph.nodes[n].belong_to == last_target_vertex.belong_to){
+            bool found_last_target = false;
+            for (int n = 0; n < graph.nodes.size(); n++) {
+                if (graph.nodes[n].id == curr_vertex.id && 
+                    graph.nodes[n].belong_to == curr_vertex.belong_to) {
                     last_target = n;
-                    RCLCPP_INFO(this->get_logger(),"execute:: Last target node was n: %d id: %d",last_target, last_target_vertex.id);
+                    found_last_target = true;
+                    RCLCPP_INFO(this->get_logger(), "execute:: Last reached node was n: %d id: %d", last_target, last_target_vertex.id);
                     break;
                 }
             }
+            if (!found_last_target) {
+                RCLCPP_WARN(this->get_logger(), "execute:: Last reached vertex not found in updated graph. Resetting to default.");
+                auto [dist, curr_vertex] = vert_graph_distance_noobstacle(graph,getCurrPos()); 
+                last_target_vertex = curr_vertex;
+                last_target = curr_vertex.id;
+                RCLCPP_WARN(this->get_logger(),"execute:: Selected node  n: %d id: %d", last_target, last_target_vertex.id);
+                if(last_target_vertex.belong_to!=goal->belong_to) RCLCPP_INFO(this->get_logger(), "The closest node is not belonging to the goal");
+            }
+
             
         }
 
@@ -577,7 +591,7 @@ private:
         {
             if(n!=last_target)
             {
-                if(graph.nodes[n].belong_to!=belong_to && graph.nodes[n].cluster_id!=cluster_id){ //&& graph.nodes[n].gain>0.0
+                if(graph.nodes[n].belong_to!=belong_to && graph.nodes[n].cluster_id!=cluster_id || graph.nodes[n].belong_to==belong_to && graph.nodes[n].cluster_id!=cluster_id ){ //&& graph.nodes[n].gain>0.0
                     RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d of R%d", n, graph.nodes[n].id,cluster_id, belong_to);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue;  
@@ -591,8 +605,16 @@ private:
                 
                 auto [distance, path] =  dijkstraWithAdj(graph,last_target,n,belong_to);
                 logIntVector(this->get_logger(),path,"getBestNode:: Path to "+std::to_string(n));
+
+                globalpath.clear();
+                for(auto n :path){
+                    globalpath.push_back(graph.nodes[n].id);
+                }
+
+                
+                logIntVector(this->get_logger(),globalpath,"getBestNode::Global Path to "+ std::to_string(n));
                 float reward = graph.nodes[n].gain / std::pow(distance, distance_exp);
-                RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d of R%d reward: %f distance:%f", n, graph.nodes[n].id, graph.nodes[n].belong_to,reward, distance);
+                RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d || R%d - C%d || reward: %f distance:%f", n, graph.nodes[n].id, graph.nodes[n].belong_to, graph.nodes[n].cluster_id,reward, distance);
                 if(reward > max_reward)
                 {
                     max_reward = reward;

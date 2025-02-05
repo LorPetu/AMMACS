@@ -34,6 +34,12 @@
 
 #include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
 #include "gbeam2_interfaces/msg/graph_cluster.hpp"
+#include "gbeam2_interfaces/msg/poly_area.hpp"
+#include "gbeam2_interfaces/msg/graph.hpp"
+#include "gbeam2_interfaces/msg/graph_update.hpp"
+
+#include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
+#include "gbeam2_interfaces/msg/graph_cluster.hpp"
 #include "gbeam2_interfaces/srv/set_mapping_status.hpp"
 #include "std_srvs/srv/set_bool.hpp"
 
@@ -890,7 +896,7 @@ private:
         int N = new_adj_matrix.size();
         double m = 0.0;
         std::vector<std::vector<float>> weight_adj_matrix(N, std::vector<float>(N, 0.0f));  // Initialize with zeros
-        std::vector<std::vector<float>> lenght_adj_matrix(N, std::vector<float>(N, 0.0f));  // Initialize with zeros
+        std::vector<std::vector<float>> lenght_adj_matrix(N, std::vector<float>(N, -1.0f));  // Initialize with zeros
 
         for (int i = 0; i < N; ++i) {
             for (int j = i+1; j < N; ++j) {
@@ -909,8 +915,6 @@ private:
             }
            
         }
-        
-        //auto cl_adj_matrix = GraphAdj2matrix(clusters.adj_matrix);
 
         // ####################################################
         // ####### ---------- ADD GRAPH EDGES --------- #######
@@ -1013,38 +1017,38 @@ private:
         // ####### --- UPDATE CONNECTIONS AND GAINS --- #######
         // #################################################### 
 
-        if(is_changed)
-        {
-            for(int n=0; n<graph.nodes.size(); n++)
-            {
-            if(graph.nodes[n].is_obstacle && !graph.nodes[n].is_completely_connected)
-            {
-                bool connected_left = false, connected_right = false;
-                for(int e : new_adj_matrix[n]){
-                    if(e!= -1 && graph.edges[e].is_boundary)
-                {
-                    // compute angular coefficient of the line containing normal: y=mx
-                    float m = graph.nodes[n].obstacle_normal.y/graph.nodes[n].obstacle_normal.x;
-                    // compute value of the inequality mx-y>0, evaluated for edge direction
-                    float value = m * graph.edges[e].direction.x - graph.edges[e].direction.y;
-                    if(graph.edges[e].v2 == n)
-                    value = -value;
-                    if(value>0)
-                    connected_right = true;
-                    else
-                    connected_left = true;
-                }
+        // if(is_changed)
+        // {
+        //     for(int n=0; n<graph.nodes.size(); n++)
+        //     {
+        //     if(graph.nodes[n].is_obstacle && !graph.nodes[n].is_completely_connected)
+        //     {
+        //         bool connected_left = false, connected_right = false;
+        //         for(int e : new_adj_matrix[n]){
+        //             if(e!= -1 && graph.edges[e].is_boundary)
+        //         {
+        //             // compute angular coefficient of the line containing normal: y=mx
+        //             float m = graph.nodes[n].obstacle_normal.y/graph.nodes[n].obstacle_normal.x;
+        //             // compute value of the inequality mx-y>0, evaluated for edge direction
+        //             float value = m * graph.edges[e].direction.x - graph.edges[e].direction.y;
+        //             if(graph.edges[e].v2 == n)
+        //             value = -value;
+        //             if(value>0)
+        //             connected_right = true;
+        //             else
+        //             connected_left = true;
+        //         }
 
-                }
+        //         }
 
 
-                if (connected_left && connected_right)
-                graph.nodes[n].is_completely_connected = true;
-                is_changed = true;
-                graph.nodes[n].gain = 0;
-            }
-            }
-        }
+        //         if (connected_left && connected_right)
+        //         graph.nodes[n].is_completely_connected = true;
+        //         is_changed = true;
+        //         graph.nodes[n].gain = 0;
+        //     }
+        //     }
+        // }
 
         // update exploration gain
         /*gbeam2_interfaces::msg::Vertex position;
@@ -1158,7 +1162,7 @@ private:
 
                             avg = (n!=0) ? avg + (graph.edges[new_adj_matrix[node_id][neigh_id]].length - avg)/n : graph.edges[new_adj_matrix[node_id][neigh_id]].length;
                             n++;
-                           // HERE I SHOULD PUT THE AVERAGE COMPUTATION OF EDGE LENGTH BETWEEN CLUSTER
+                            // HERE I SHOULD PUT THE AVERAGE COMPUTATION OF EDGE LENGTH BETWEEN CLUSTER
                         }
                         
                     }
@@ -1440,6 +1444,8 @@ private:
 
             //RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
 
+            is_changed = true;
+
             tot_density_curr = 0.0;
             avg_degree=0.0;
 
@@ -1487,9 +1493,12 @@ private:
                 }
             }
 
+            //printMatrix(this->get_logger(),cluster_adj_matrix,"cluster_adj_matrix");
+
             // Resize the cluster adjacency matrix
             int new_size = new_id; // Total number of clusters after cleanup
             std::vector<std::vector<float>> updated_adj_matrix(new_size, std::vector<float>(new_size, 0.0));
+            std::vector<std::vector<float>> simple_adj_matrix(new_size, std::vector<float>(new_size, -1.0));
             std::vector<std::vector<float>> updated_avg_lenght_matrix(new_size, std::vector<float>(new_size, 0.0));
 
             // Rebuild the adjacency matrix using the updated cluster IDs
@@ -1510,6 +1519,33 @@ private:
                     }
                 }
             }
+
+            // Safety check recomputation adjacency matrix
+
+            for (int i = 0; i < Graphclusters.clusters.size(); ++i) {
+                for (int j = i; j < Graphclusters.clusters.size(); ++j) {
+                    bool connection_found = false;
+                    auto& cl_i = Graphclusters.clusters[i];
+                    auto& cl_j = Graphclusters.clusters[j];
+                    if(cl_i.cluster_id==cl_j.cluster_id) continue;
+                    for(auto node_i : cl_i.nodes){
+                        if (connection_found) break;
+                        for(auto node_j : cl_j.nodes){
+                            if (new_adj_matrix[node_i][node_j] != -1) {
+                                simple_adj_matrix[i][j] = 1;
+                                simple_adj_matrix[j][i] = 1;
+                                connection_found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+
+
+            // printMatrix(this->get_logger(),updated_adj_matrix,"Updated Matrix");
+            // printMatrix(this->get_logger(),simple_adj_matrix,"Simple Matrix");
 
             // ####################################################
             // ############## BRIDGES VALIDATION ##################
