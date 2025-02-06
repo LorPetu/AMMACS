@@ -327,10 +327,11 @@ private:
       auto& cl_i = GlobalClusters.clusters[i];
       int N = stored_Graph->map[cl_i.belong_to].cluster_graph.clusters.size();
 
-      for(int j=i+1;j<GlobalClusters.clusters.size(); j++){
+      for(int j=i;j<GlobalClusters.clusters.size(); j++){
         auto& cl_j = GlobalClusters.clusters[j];
         if(cl_i.belong_to==cl_j.belong_to){
-          auto el = stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data[i*N + j];
+          auto local_index = cl_i.cluster_id*N+cl_j.cluster_id;
+          auto el = stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data[local_index];
           global_adj_matrix[i][j] = (el>1e-4) ? el: -1.0;
           global_adj_matrix[j][i] = global_adj_matrix[i][j];
           //belong_matrix[i][cluster_l2g_index[cl_i.belong_to][neigh_id]] = cl_i.belong_to;    

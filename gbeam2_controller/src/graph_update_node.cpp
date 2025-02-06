@@ -1544,8 +1544,8 @@ private:
 
 
 
-            // printMatrix(this->get_logger(),updated_adj_matrix,"Updated Matrix");
-            // printMatrix(this->get_logger(),simple_adj_matrix,"Simple Matrix");
+            printMatrix(this->get_logger(),updated_adj_matrix,"Updated Matrix");
+            printMatrix(this->get_logger(),simple_adj_matrix,"Simple Matrix");
 
             // ####################################################
             // ############## BRIDGES VALIDATION ##################
@@ -1614,12 +1614,15 @@ private:
             
             Graphclusters.adj_matrix=matrix2GraphAdj(updated_adj_matrix);
             Graphclusters.length_matrix=matrix2GraphAdj(updated_avg_lenght_matrix);
+
+            gbeam2_interfaces::msg::GraphCluster GraphClusters_copy = Graphclusters;
+            GraphClusters_copy.adj_matrix =matrix2GraphAdj(simple_adj_matrix);
             //printMatrix(this->get_logger(),avg_lenght_matrix);
-            graph.cluster_graph = Graphclusters;
+            graph.cluster_graph = GraphClusters_copy;
 
             ////printMatrix(this->get_logger(),updated_adj_matrix); //
             graph_pub_->publish(graph);
-            clusters_pub_->publish(Graphclusters);
+            //clusters_pub_->publish(Graphclusters);
         }    
         if(is_changed && received_ext_nodes)   received_ext_nodes = false;
     

@@ -248,6 +248,7 @@ private:
         last_status[status->robot_id]=*status;
 
         double node_dist_open = 0.3; //node_dist_open: 0.3
+        bool is_changed=false;
         // Update exploration gain based on the position and the current occupied cluster
         if(global_map.map[status->current_cluster.belong_to].nodes.empty()) return;
 
@@ -271,18 +272,22 @@ private:
                 //     node.id,node.cluster_id,node.belong_to);
                 if(node.belong_to==name_space_id){
                     global_map.map[name_space_id].nodes[node.id]=node;
+                    is_changed=true;
                 }else{
                      for(auto buff_node : graphBuffer[node.belong_to]->nodes){
                             if(buff_node.belong_to==node.belong_to && buff_node.id==node.id) is_present=true;
                         }
-                        if(!is_present) graphBuffer[node.belong_to]->nodes.push_back(node);
+                        if(!is_present){
+                            graphBuffer[node.belong_to]->nodes.push_back(node);
+                            is_changed=true;
+                        }
                 }
                 
                 
             }
         }
 
-        merged_graph_pub_->publish(global_map);
+        if(is_changed) merged_graph_pub_->publish(global_map);
 
         is_gain_updated=true;
     }
@@ -454,33 +459,6 @@ private:
             gbeam2_interfaces::msg::GraphUpdate updates;
             updates.bridges = request->update_request.cluster_graph.bridges;
             updates.robot_id = req_robot_id;
-
-            // TODO: is not sending anything
-
-            // for(gbeam2_interfaces::msg::Vertex node: request->update_request.nodes){
-            //     RCLCPP_INFO(this->get_logger(),"PREPARE FEEDBACK:: node id: %d belong to %d",node.id,node.belong_to);
-            //     bool add_to_feedback=false;
-            //     auto& mod_graph = global_map.map[node.belong_to];
-            //     // avoid sending back my own node received by someone else
-            //     if(node.belong_to!=name_space_id){
-            //         if(node.id<last_update_node_with[node.belong_to]){
-                   
-            //             // Send to graph update only old ones with changed cluster
-            //             if(node.cluster_id!=global_map.map[node.belong_to].nodes[node.id].cluster_id){
-            //                 add_to_feedback =true;
-            //             }
-                            
-                   
-            //         }
-            //         else{
-            //             // adding new node                    
-            //             add_to_feedback = true;
-                         
-            //         }
-            //     }    
-            //     if(add_to_feedback) updates.new_nodes.push_back(vert_transform(node,getTransform(target_frame,source_frame)));
-                        
-            // }
 
             // Update the global map with the information just received
             //RCLCPP_INFO(this->get_logger(),"UPDATE GLOBAL MAP IN SERVER CALLBACK - request->update_request");
