@@ -76,12 +76,12 @@
       <material name="light_black"/>
     </visual>
 
-    <collision>
+    <!-- <collision>
       <origin xyz="-0.064 0 0.047" rpy="0 0 0"/>
       <geometry>
         <box size="0.266 0.266 0.094"/>
       </geometry>
-    </collision>
+    </collision> -->
 
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -226,12 +226,12 @@
       <material name="dark"/>
     </visual>
 
-    <collision>
+    <!-- <collision>
       <origin xyz="0.015 0 -0.0065" rpy="0 0 0"/>
       <geometry>
         <cylinder length="0.0315" radius="0.055"/>
       </geometry>
-    </collision>
+    </collision> -->
 
     <inertial>
       <mass value="0.114" />
@@ -255,12 +255,12 @@
        <mesh filename="file://${meshes_folder}/sensors/r200.dae" />
       </geometry>
     </visual>
-    <collision>
+    <!-- <collision>
       <origin xyz="0.003 0.065 0.007" rpy="0 0 0"/>
       <geometry>
         <box size="0.012 0.132 0.020"/>
       </geometry>
-    </collision>
+    </collision> -->
 
     <!-- This inertial field needs doesn't contain reliable data!! -->
 <!--   <inertial>
