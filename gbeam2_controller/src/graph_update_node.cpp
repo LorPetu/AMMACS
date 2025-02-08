@@ -1520,7 +1520,7 @@ private:
                 }
             }
 
-            // Safety check recomputation adjacency matrix
+            // Safety check recomputation adjacency matrix to have a ground truth
 
             for (int i = 0; i < Graphclusters.clusters.size(); ++i) {
                 for (int j = i; j < Graphclusters.clusters.size(); ++j) {
@@ -1544,8 +1544,8 @@ private:
 
 
 
-            printMatrix(this->get_logger(),updated_adj_matrix,"Updated Matrix");
-            printMatrix(this->get_logger(),simple_adj_matrix,"Simple Matrix");
+            // printMatrix(this->get_logger(),updated_adj_matrix,"Updated Matrix");
+            // printMatrix(this->get_logger(),simple_adj_matrix,"Simple Matrix");
 
             // ####################################################
             // ############## BRIDGES VALIDATION ##################

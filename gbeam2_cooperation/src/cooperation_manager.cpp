@@ -290,7 +290,7 @@ private:
     stored_Graph = global_map_received;
     int req_robot_id = stored_Graph->last_updater;
     auto& graph_received = stored_Graph->map[req_robot_id];
-    RCLCPP_INFO(this->get_logger(), "Received global Map last updated by robot%d",req_robot_id);
+    //RCLCPP_INFO(this->get_logger(), "Received global Map last updated by robot%d",req_robot_id);
     bool new_nodes=false;
        
     GlobalClusters.clusters.clear();
@@ -353,7 +353,7 @@ private:
     GlobalClusters.bridges = stored_Graph->map[req_robot_id].cluster_graph.bridges;
     GlobalClusters.adj_matrix = matrix2GraphAdj(global_adj_matrix);
 
-    printMatrix(this->get_logger(),global_adj_matrix);
+    //printMatrix(this->get_logger(),global_adj_matrix);
 
     clusters_pub_->publish(GlobalClusters);
 
@@ -365,7 +365,8 @@ private:
       // Also shortest bridges are selected if needed
 
       gbeam2_interfaces::msg::Graph result;
-   
+      result.cluster_graph.bridges.clear();
+      // TODO: use clusters_ids.size() - 1 and remove condition
       for(int i=0; i<clusters_ids.size(); i++){
         auto cl = GlobalClusters.clusters[clusters_ids[i]];
         //RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",cl.nodes.size(),cl.cluster_id);
@@ -381,13 +382,18 @@ private:
             sel_bridge.length =INF;
             // Select a bridge to pass from cl to next
             for(auto& bridge:GlobalClusters.bridges){
-              if(bridge.r1 == cl.belong_to && bridge.r2 == next.belong_to ||
-                  bridge.r2 == cl.belong_to && bridge.r1 == next.belong_to){
-                    // Select the shortest bridge between the 2 cluster
-                    if(bridge.length < sel_bridge.length){
-                      sel_bridge=bridge;
-                    }
-                  }
+              if(bridge.r1 == cl.belong_to && bridge.r2 == next.belong_to && 
+                bridge.c1 == cl.cluster_id && bridge.c2 == next.cluster_id){
+                  
+                  if(bridge.length < sel_bridge.length) sel_bridge=bridge;
+
+
+              }else if (bridge.r2 == cl.belong_to && bridge.r1 == next.belong_to &&
+                        bridge.c2 == cl.cluster_id && bridge.c1 == next.cluster_id)
+              { 
+                if(bridge.length < sel_bridge.length) sel_bridge=bridge;
+            
+              }
             }
 
             result.cluster_graph.bridges.push_back(sel_bridge);
@@ -498,11 +504,11 @@ private:
     int best_cluster_id=-1;
     std::vector<int> best_path;
     
-    RCLCPP_INFO(this->get_logger(),"Start searching for best cluster");
+    RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: Start searching for best cluster");
 
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
       if(std::find(occupied_clusters.begin(),occupied_clusters.end(),i) != occupied_clusters.end()){
-        RCLCPP_INFO(this->get_logger(),"Can't select cluster %d",i);
+        RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: Can't select cluster %d because is occupied",i);
         continue;
       }else{
         if(GlobalClusters.clusters[i].nodes.size()<3 || GlobalClusters.clusters[i].total_gain==0.0) continue; // Skip small clusters that can be merged TODO
@@ -514,8 +520,8 @@ private:
           
           if(path.size()>0){
             double reward_avg = (GlobalClusters.clusters[i].total_gain/GlobalClusters.clusters[i].unexplored_nodes.size()) / pow(distance,exp_distance);
-            RCLCPP_INFO(this->get_logger(),"CLUSTER: %d - average reward: %f - distance %f - total_gain: %f - number of unexplored nodes: %d",
-                                                      i, reward_avg,distance,GlobalClusters.clusters[i].total_gain,GlobalClusters.clusters[i].unexplored_nodes.size());
+            //RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: CLUSTER: %d - average reward: %f - distance %f - total_gain: %f - number of unexplored nodes: %d",
+           //                                           i, reward_avg,distance,GlobalClusters.clusters[i].total_gain,GlobalClusters.clusters[i].unexplored_nodes.size());
             if(reward_avg>best_reward){
               best_cluster_id = i;
               best_path = path;
@@ -531,12 +537,7 @@ private:
       
     }
 
-    RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: %d - average reward: %f - %d clusters away",best_cluster_id, best_reward, best_path.size());
-
-    std::string path_str;
-    for (int node : best_path) {
-        path_str += std::to_string(node) + "-";
-    }
+    //RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: %d - average reward: %f - %d clusters away",best_cluster_id, best_reward, best_path.size());
 
   
 
@@ -558,6 +559,8 @@ private:
     
     bool AreaDivision_isrequired = false;
 
+    RCLCPP_INFO(this->get_logger(),"############## NEW CLUSTER EXPLORATION ##############");
+
     if(last_selected_cluster_id<0){
       // Node is just started
       if(!GlobalClusters.clusters.empty()){
@@ -569,7 +572,7 @@ private:
           clusters_to_send.push_back(last_selected_cluster_id);
           
           // Send GOAL
-          send_goal(clusters_to_send,last_selected_cluster,false);
+          send_goal(clusters_to_send,last_selected_cluster);
 
           last_selected_cluster.is_target = true;
           current_cluster_pub_->publish(last_selected_cluster);
@@ -577,16 +580,16 @@ private:
 
         }else{
           // I have no cluster at all or I didn't already compute one
-          RCLCPP_INFO(this->get_logger(),"I have no cluster at all or I didn't already compute one");
+          RCLCPP_INFO(this->get_logger(),"++ I have no cluster at all or I didn't already compute one");
           if(stored_Graph->map[name_space_id].nodes.size()>4){
-            RCLCPP_INFO(this->get_logger(),"I have some nodes but they don't compose a cluster yet");
+            RCLCPP_INFO(this->get_logger(),"+++I have some nodes but they don't compose a cluster yet");
           }
           else{
             int curr_cl_id = getCurrentCluster(robot_pos);
             if(curr_cl_id!=-1){
               auto curr_cl = GlobalClusters.clusters[curr_cl_id];
 
-              RCLCPP_INFO(this->get_logger(),"I'm in global cluster %d --> id: %d belong to: %d",curr_cl_id,curr_cl.cluster_id,curr_cl.belong_to);
+              RCLCPP_INFO(this->get_logger(),"+++ I'm in global cluster %d --> id: %d belong to: %d",curr_cl_id,curr_cl.cluster_id,curr_cl.belong_to);
               AreaDivision_isrequired=true;
             }
 
@@ -595,7 +598,7 @@ private:
         }
 
       }else{
-        RCLCPP_WARN(this->get_logger(),"Can't select any cluster because there aren't any");
+        RCLCPP_WARN(this->get_logger(),"+ Can't select any cluster because there aren't any");
       }     
       
 
@@ -624,44 +627,53 @@ private:
 
       auto [best_cl_id,best_path] = getBestCluster(last_selected_cluster_id,occupied_clusters);
 
+      auto best_cl = GlobalClusters.clusters[best_cl_id];
+
+      RCLCPP_INFO(this->get_logger(),"+ Best Cluster selected: %d || C%d R%d || - %d clusters away",
+                                        best_cl_id, best_cl.cluster_id,best_cl.belong_to, best_path.size());
+
       gbeam2_interfaces::msg::Bridge bridge_to_send;
 
       clusters_to_send = best_path;
       std::string path_str;
-          for (auto id : clusters_to_send) {
-              path_str += std::to_string(id) + "-";
-          }
-      RCLCPP_INFO(this->get_logger(), "BEST CLUSTER: Path computed with adj is: %s", path_str.c_str());
+      std::ostringstream owners; 
+      for (auto id : clusters_to_send) {
+          path_str += std::to_string(id) + "-";
+          owners << " ( C" << GlobalClusters.clusters[id].cluster_id << " - R" <<GlobalClusters.clusters[id].belong_to << " ) -";
+      }
+      owners << "> STOP";
+      RCLCPP_INFO(this->get_logger(),"+ Path to %d  computed with adj is: %s", path_str.c_str());
+      RCLCPP_INFO(this->get_logger(),"+ Didascalic Path: %s",owners.str().c_str());
 
       // is the current cluster the best? 
       // BEST CLUSTER SEARCH 
       //RCLCPP_INFO(this->get_logger(),"exit from getBestCluster function");
       if(last_selected_cluster_id!=best_cl_id){
         //RCLCPP_INFO(this->get_logger(),"last selected cluster: %d ",last_selected_cluster_id);
-        auto best_cl = GlobalClusters.clusters[best_cl_id];
-       
         ////RCLCPP_INFO(this->get_logger(),"Global cluster array is ok:");
         if(best_cl.belong_to!=name_space_id){
+
           last_selected_cluster_id = best_cl_id;
           last_selected_cluster = best_cl;
-          RCLCPP_INFO(this->get_logger(),"AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
+          RCLCPP_INFO(this->get_logger(),"+++ AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[last_selected_cluster_id].belong_to, last_selected_cluster_id);
           
           AreaDivision_isrequired = true;
 
-          send_goal(clusters_to_send,last_selected_cluster,true);
+         
+          send_goal(clusters_to_send,last_selected_cluster);
           
         }else{          
           last_selected_cluster_id = best_cl_id;
           last_selected_cluster = best_cl;
-          RCLCPP_INFO(this->get_logger(),"Select cluster of mine with id: %d",last_selected_cluster_id);
+          RCLCPP_INFO(this->get_logger(),"+++ Select cluster of mine with id: %d",last_selected_cluster_id);
           
 
-          send_goal(clusters_to_send,last_selected_cluster,false);
+          send_goal(clusters_to_send,last_selected_cluster);
           
         }
       }else{
-        RCLCPP_INFO(this->get_logger(),"Mantain last selected id: %d",last_selected_cluster_id);
-        send_goal(clusters_to_send,last_selected_cluster,false);
+        RCLCPP_INFO(this->get_logger(),"++ Mantain last selected id: %d",last_selected_cluster_id);
+        send_goal(clusters_to_send,last_selected_cluster);
       }
       
       
@@ -684,10 +696,9 @@ private:
     // Publish to status the current cluster
     last_selected_cluster.is_target = true;
     current_cluster_pub_->publish(last_selected_cluster);
-
-    // Build a graph with only selected cluster and publish it to the explorer 
-    
-    //assigned_graph_pub_->publish(getAssignedGraph(clusters_to_send));
+    RCLCPP_INFO(this->get_logger(),"####################### END #######################");
+    RCLCPP_INFO(this->get_logger(),"--------------------------------------------------");
+    RCLCPP_INFO(this->get_logger(),"--------------------------------------------------");
   }
 
   
@@ -735,7 +746,7 @@ private:
       navigationCallback(!result.result->task_completed);
   }
 
-  void send_goal(std::vector<int> clusters_ids, gbeam2_interfaces::msg::GraphClusterNode cluster_task, const bool has_bridge){
+  void send_goal(std::vector<int> clusters_ids, gbeam2_interfaces::msg::GraphClusterNode cluster_task){
 
     if (!action_client_->wait_for_action_server(std::chrono::seconds(5)))
     {
@@ -764,13 +775,15 @@ private:
     goal_msg.cluster_id_task = cluster_task.cluster_id;
     goal_msg.belong_to = cluster_task.belong_to; 
     goal_msg.assigned_graph = assigned_graph;
-    goal_msg.has_target_bridge = has_bridge;
+    goal_msg.has_target_bridge = (!assigned_graph.cluster_graph.bridges.empty());
+    goal_msg.target_bridge = assigned_graph.cluster_graph.bridges;
+
     for(int z=0; z<stored_Graph->map.size();z++){
       goal_msg.adj_matrix.push_back(stored_Graph->map[z].length_matrix);
     }
     
     
-    if(has_bridge) goal_msg.target_bridge = assigned_graph.cluster_graph.bridges;
+    
 
     //RCLCPP_INFO(this->get_logger(), "Sending goal to cluster ID: %d", goal_msg.cluster_id_task);
 

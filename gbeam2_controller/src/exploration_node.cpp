@@ -77,6 +77,7 @@ public:
         this->declare_parameter<double>("limit_xs",0.0);
         this->declare_parameter<double>("limit_yi",0.0);
         this->declare_parameter<double>("limit_ys",0.0);
+        this->declare_parameter<int>("N_robot",0);
 
         // Get parameter from yaml file
         reached_tol = this->get_parameter("reached_tol").get_parameter_value().get<float>();
@@ -86,6 +87,8 @@ public:
         limit_yi = this->get_parameter("limit_yi").get_parameter_value().get<double>();
         limit_ys = this->get_parameter("limit_ys").get_parameter_value().get<double>();
 
+        N_robot = this->get_parameter("N_robot").get_parameter_value().get<int>();
+
         RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF EXPLORATION NODE: ############# ");
         RCLCPP_INFO(this->get_logger(),"1) REACHED_TOL: %f", reached_tol);
         RCLCPP_INFO(this->get_logger(),"2) DISTANCE_EXP: %f", distance_exp);
@@ -93,7 +96,9 @@ public:
         RCLCPP_INFO(this->get_logger(),"4) LIMIT_XS: %f", limit_xs);
         RCLCPP_INFO(this->get_logger(),"5) LIMIT_YI: %f", limit_yi);
         RCLCPP_INFO(this->get_logger(),"6) LIMIT_YS: %f", limit_ys);
+        RCLCPP_INFO(this->get_logger(),"7) N_robot: %d", N_robot);
         
+        new_mapping.resize(N_robot);
       //---------------------------------------------
 
         using namespace std::placeholders;
@@ -119,6 +124,7 @@ private:
     int N=0, E=0; 
     int last_target =-1;
     int mapping_z = 5;
+    int N_robot;
     
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
     
@@ -126,6 +132,7 @@ private:
     std::string name_space;
     
     gbeam2_interfaces::msg::Graph graph;
+    std::vector<std::unordered_map<int,int>> new_mapping;
     std::vector<gbeam2_interfaces::msg::GraphAdjacency> getAdjMatrixof;
     gbeam2_interfaces::msg::Vertex last_target_vertex;
     gbeam2_interfaces::msg::Vertex intermediate_target_vertex;
@@ -186,27 +193,39 @@ private:
         RCLCPP_INFO(logger, "%s", oss.str().c_str());
     }
 
-    std::pair<float,std::vector<int>>  dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t, int belong_to)
+    std::pair<float,std::vector<int>>  dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t, int belong_who)
     {
     int N = graph.nodes.size();
-    auto adjMatrix = graph.length_matrix.data;
-    int N_matrix = graph.length_matrix.size;
+    std::vector<float> adjMatrix;
+    int N_matrix;
+    int belong_to;
     // In this way we consider only the nodes of the adj matrix to which 
     // the source s belong (and also the target t)
     //int belong_to = graph.nodes[s].belong_to;
 
+    if(s>N) RCLCPP_ERROR(this->get_logger(),"Dijkstra:: Source Node out of bound");
+    if(t>N) RCLCPP_ERROR(this->get_logger(),"Dijkstra:: Target Node out of bound");
     // Since we're considering only reachable node we skip the filtering part.
 
     std::vector<float> dist(N, INF);
     std::vector<int> parent(N, -1); // To store the shortest path tree
     std::priority_queue<std::pair<double, int>, std::vector<std::pair<double, int>>, std::greater<>> pq;
 
+    if(graph.nodes[s].belong_to!=graph.nodes[t].belong_to){
+        RCLCPP_ERROR(this->get_logger(),"Dijkstra:: Source and target belong to different path! Cannot compute path!");
+        return std::make_pair(INF,path);
+    }else{
+        belong_to = graph.nodes[s].belong_to;
+        adjMatrix = getAdjMatrixof[belong_to].data;
+        N_matrix = getAdjMatrixof[belong_to].size;
+    }
+
     //printMatrix(this->get_logger(),GraphAdj2matrix(graph.length_matrix));
 
     dist[s] = 0.0;
     pq.push({0.0, s});
 
-    //RCLCPP_INFO(this->get_logger(),"Dijkstra:: algorithm inizialization");
+    RCLCPP_INFO(this->get_logger(),"Dijkstra:: algorithm initialization path from %d to %d - (local enum.)",s,t);
 
         while (!pq.empty()) {
             auto [currentDist, u] = pq.top();
@@ -330,7 +349,17 @@ private:
         RCLCPP_INFO(this->get_logger(),"Execute goal: #################NEW GOAL################");
         RCLCPP_INFO(this->get_logger(),"Execute goal: explore cluster %d of robot%d",goal->cluster_id_task, goal->belong_to);
         RCLCPP_INFO(this->get_logger(),"Execute goal: ########################################");
+        // -- Remapping all the nodes index
+        for(int z=0;z<N_robot;z++){
+            new_mapping[z].clear();
+        }
+        for (int n = 0; n < graph.nodes.size(); n++) {
+           auto& node = graph.nodes[n];
+           
+           new_mapping[node.belong_to][node.id] = n;
+        }
 
+        // --
         if(last_target<0){
             // Inizialization, node is just started or the previous action has been cancelled 
             // Get the node on which i am
@@ -340,26 +369,19 @@ private:
             last_target = curr_vertex.id;
             //RCLCPP_INFO(this->get_logger(), "INIT: I am on the node with id: global:%d", id);        
         }else{
-            bool found_last_target = false;
-            for (int n = 0; n < graph.nodes.size(); n++) {
-                if (graph.nodes[n].id == curr_vertex.id && 
-                    graph.nodes[n].belong_to == curr_vertex.belong_to) {
-                    last_target = n;
-                    found_last_target = true;
-                    RCLCPP_INFO(this->get_logger(), "execute:: Last reached node was n: %d id: %d", last_target, last_target_vertex.id);
-                    break;
-                }
-            }
-            if (!found_last_target) {
+            auto it = new_mapping[curr_vertex.belong_to].find(curr_vertex.id);
+            if(it!=new_mapping[curr_vertex.belong_to].end()){
+                // I have a corresponding mapping
+                last_target = it->second;
+                RCLCPP_INFO(this->get_logger(), "execute:: Last reached node was n: %d id: %d belong to:%d", last_target, last_target_vertex.id,last_target_vertex.belong_to);
+            }else{
                 RCLCPP_WARN(this->get_logger(), "execute:: Last reached vertex not found in updated graph. Resetting to default.");
                 auto [dist, curr_vertex] = vert_graph_distance_noobstacle(graph,getCurrPos()); 
                 last_target_vertex = curr_vertex;
                 last_target = curr_vertex.id;
                 RCLCPP_WARN(this->get_logger(),"execute:: Selected node  n: %d id: %d", last_target, last_target_vertex.id);
                 if(last_target_vertex.belong_to!=goal->belong_to) RCLCPP_INFO(this->get_logger(), "The closest node is not belonging to the goal");
-            }
-
-            
+            }            
         }
 
         if(has_target_bridge){
@@ -381,8 +403,7 @@ private:
 
             local_target    =   bestpair.first;
             path            =   bestpair.second;
-
-            
+     
             
         }
 
@@ -452,24 +473,29 @@ private:
                     RCLCPP_INFO(this->get_logger(),"execute:: Last target Vertex belong to: %d",last_target_vertex.belong_to );
 
                     // Enumeration based on the owner of the end
-                    int bridge_end_id = (last_target_vertex.belong_to == trasp_bridge.r1) ? trasp_bridge.v2 : trasp_bridge.v1;
-                    int bridge_end_belong_to = (last_target_vertex.belong_to == trasp_bridge.r1) ? trasp_bridge.r2 : trasp_bridge.r1; 
+                    int bridge_end_id = (curr_vertex.belong_to == trasp_bridge.r1) ? trasp_bridge.v2 : trasp_bridge.v1;
+                    int bridge_end_belong_to = (curr_vertex.belong_to == trasp_bridge.r1) ? trasp_bridge.r2 : trasp_bridge.r1; 
 
                     RCLCPP_INFO(this->get_logger(),"execute:: Trespass to other end... node id: %d belong to: %d",bridge_end_id,bridge_end_belong_to);
 
                     //intermediate_target_vertex = graph.nodes[bridge_end_id];
-
+                    RCLCPP_INFO(this->get_logger(), "execute:: New Mapping of the bridge end is n: %d id: %d", new_mapping[bridge_end_belong_to][bridge_end_id], bridge_end_id);
                     
-                    
-                        
-                    for(int i=0; i<graph.nodes.size();i++){
-                        if(graph.nodes[i].belong_to==bridge_end_belong_to && graph.nodes[i].id==bridge_end_id) {
-                            local_target = i; 
-                            intermediate_target_vertex = graph.nodes[i];
-                                                        
-                            break;
-                        }
-                    }
+                    auto it = new_mapping[bridge_end_belong_to].find(bridge_end_id);
+                    if(it!=new_mapping[curr_vertex.belong_to].end()){
+                        // I have a corresponding mapping
+                        last_target = it->second;
+                        local_target=last_target;
+                        last_target_vertex = graph.nodes[last_target];
+                        RCLCPP_INFO(this->get_logger(), "execute:: Last reached node was n: %d id: %d", last_target, last_target_vertex.id);
+                    }else{
+                        RCLCPP_WARN(this->get_logger(), "execute:: Last reached vertex not found in updated graph. Resetting to default.");
+                        auto [dist, curr_vertex] = vert_graph_distance_noobstacle(graph,getCurrPos()); 
+                        last_target_vertex = curr_vertex;
+                        last_target = curr_vertex.id;
+                        RCLCPP_WARN(this->get_logger(),"execute:: Selected node  n: %d id: %d", last_target, last_target_vertex.id);
+                        if(last_target_vertex.belong_to!=goal->belong_to) RCLCPP_INFO(this->get_logger(), "The closest node is not belonging to the goal");
+                    }      
 
                     RCLCPP_INFO(this->get_logger(),"execute:: Trespass to other end... node local id: %d",local_target);
 
@@ -481,7 +507,7 @@ private:
 
                     // rclcpp::sleep_for(std::chrono::milliseconds(1500));
 
-                    last_target = local_target;
+
 
                     graph.length_matrix = getAdjMatrixof[intermediate_target_vertex.belong_to];
                     graph.adj_matrix    = getAdjMatrixof[intermediate_target_vertex.belong_to];
@@ -591,10 +617,14 @@ private:
         {
             if(n!=last_target)
             {
-                if(graph.nodes[n].belong_to!=belong_to && graph.nodes[n].cluster_id!=cluster_id || graph.nodes[n].belong_to==belong_to && graph.nodes[n].cluster_id!=cluster_id ){ //&& graph.nodes[n].gain>0.0
-                    RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d of R%d", n, graph.nodes[n].id,cluster_id, belong_to);
+                if(graph.nodes[n].belong_to!=belong_to){ //&& graph.nodes[n].gain>0.0
+                    RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to goal belong_to R%d", n, graph.nodes[n].id, belong_to);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue;  
+                }else if(graph.nodes[n].cluster_id!=cluster_id){
+                    RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d of R%d", n, graph.nodes[n].id,cluster_id, belong_to);
+                    continue;
+
                 }else if (graph.nodes[n].gain==0.0)
                 {
                     RCLCPP_INFO(this->get_logger(),"Node %d: id: %d has zero gain", n, graph.nodes[n].id);
@@ -647,7 +677,7 @@ private:
         // Check if the current position has reached the next vertex in the path
         if (dist(intermediate_target_vertex, pos) <= reached_tol) {
             // We've reached the next node in the path
-            //RCLCPP_INFO(this->get_logger(),"pathHandle::Reached intermediate target!");
+            RCLCPP_INFO(this->get_logger(),"pathHandle::Reached intermediate target!");
             last_reached = path[1];  // The node we just reached
 
             // Modify last_target and reduce path
@@ -655,7 +685,7 @@ private:
 
             // If we reach the end of the path, set is_target to true
             if (path.empty()) {
-                //RCLCPP_INFO(this->get_logger(),"pathHandle::Reached end of the path!");
+                RCLCPP_INFO(this->get_logger(),"pathHandle::Reached end of the path!");
                 is_target = true;
                 curr_vertex=last_target_vertex;
             } else {
@@ -665,7 +695,7 @@ private:
             }
         } else {
             // We're still on the current path segment
-            //RCLCPP_INFO(this->get_logger(),"pathHandle::Still at previous step");
+            RCLCPP_INFO(this->get_logger(),"pathHandle::Still at previous step");
             last_reached = path[0];
             intermediate_target_vertex = graph.nodes[path[1]];
             curr_vertex = graph.nodes[path[0]];
