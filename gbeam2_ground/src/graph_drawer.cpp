@@ -350,13 +350,13 @@ private:
             text_marker.pose.position.y = cluster.centroid.y;
             text_marker.pose.position.z = cluster_height + (cluster.total_gain * gain_scale) + 0.5; 
 
-            text_marker.scale.z = 0.5; // Font size
+            text_marker.scale.z = 0.2; // Font size
             text_marker.color.r = 1.0; // White text
             text_marker.color.g = 1.0;
             text_marker.color.b = 1.0;
             text_marker.color.a = 1.0;
 
-            text_marker.text = std::to_string(i); // Cluster ID as text
+            text_marker.text = "C" + std::to_string(cluster.cluster_id)+"R"+std::to_string(cluster.belong_to); // Cluster ID as text
 
             text_markers.markers.push_back(text_marker);
             centroid_points.markers.push_back(marker);
