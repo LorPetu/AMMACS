@@ -141,6 +141,8 @@ private:
   int last_updated_cluster;
   bool start_coop = false;
   int prev_clusters_size = 0;
+  bool execute_nav= false; 
+  float tot_global_gain=-1;
 
 
   //Navigation variables
@@ -297,6 +299,7 @@ private:
     auto& graph_received = stored_Graph->map[req_robot_id];
     //RCLCPP_INFO(this->get_logger(), "Received global Map last updated by robot%d",req_robot_id);
     bool new_nodes=false;
+    int curr_tot_global_gain=0;
        
     GlobalClusters.clusters.clear();
 
@@ -324,6 +327,7 @@ private:
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
       auto& cl_i = GlobalClusters.clusters[i];
       computeClusterProperties2(cl_i);
+      curr_tot_global_gain+= cl_i.total_gain;
       cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id] = i;
     }
     //for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
@@ -362,8 +366,9 @@ private:
 
     clusters_pub_->publish(GlobalClusters);
 
-    if(GlobalClusters.clusters.size()>prev_clusters_size){
+    if(curr_tot_global_gain>0.0){
       prev_clusters_size = GlobalClusters.clusters.size();
+      tot_global_gain = curr_tot_global_gain;
       // Check if a goal is currently executing
       if (current_goal_handle_)
       {
@@ -374,26 +379,37 @@ private:
             RCLCPP_WARN(this->get_logger(), "A goal is already executing. Not sending a new goal.");
             return;
         }else{
+          RCLCPP_WARN(this->get_logger(), "No goal is executing, recompute a new target cluster");
           navigationCallback(false);
         }
       }
 
       
+    }else{
+      RCLCPP_INFO_ONCE(this->get_logger(),"ZERO TOT GLOBAL GAIN, exploration completed");
     }
+
 
   }
 
-  gbeam2_interfaces::msg::Graph getAssignedGraph(const std::vector<int> clusters_ids){
+  gbeam2_interfaces::msg::Graph getAssignedGraph(std::vector<int> clusters_ids){
       // we process cluster by cluster the path to get to the objective 
       // and all the useful adjacency matrix for navigation
       // Also shortest bridges are selected if needed
+
+      // Check if the curr cluster is included 
+
+      if(std::find(clusters_ids.begin(),clusters_ids.end(),curr) == clusters_ids.end()){
+        clusters_ids.insert(clusters_ids.begin(),curr);
+        RCLCPP_WARN(this->get_logger(),"getAssignedGraph:: current cluster %d was not included in assigned graph!",curr);
+      }
 
       gbeam2_interfaces::msg::Graph result;
       result.cluster_graph.bridges.clear();
       // TODO: use clusters_ids.size() - 1 and remove condition
       for(int i=0; i<clusters_ids.size(); i++){
         auto cl = GlobalClusters.clusters[clusters_ids[i]];
-        //RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",cl.nodes.size(),cl.cluster_id);
+        RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",cl.nodes.size(),cl.cluster_id);
         result.cluster_graph.clusters.push_back(cl);
         for(auto& node_id:cl.nodes){
           result.nodes.push_back(stored_Graph->map[cl.belong_to].nodes[node_id]);
@@ -703,6 +719,7 @@ private:
         auto request = std::make_shared<std_srvs::srv::SetBool::Request>();
         request->data = true;
         try_clustering_service_->async_send_request(request);
+
         return;
       }
 

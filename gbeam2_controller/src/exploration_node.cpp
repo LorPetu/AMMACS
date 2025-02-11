@@ -228,7 +228,7 @@ private:
     dist[s] = 0.0;
     pq.push({0.0, s});
 
-    RCLCPP_INFO(this->get_logger(),"Dijkstra:: algorithm initialization path from %d to %d - (local enum.)",s,t);
+    //RCLCPP_INFO(this->get_logger(),"Dijkstra:: algorithm initialization path from %d to %d - (local enum.)",s,t);
 
         while (!pq.empty()) {
             auto [currentDist, u] = pq.top();
@@ -375,7 +375,7 @@ private:
 
         task_completed = false;
         int local_target =-1; // Local enumeration of nodes using index (last_reached follow the same logic)
-        int trespassed_bridges = 0;
+        int crossed_bridges = 0;
         bool has_target_bridge = goal->has_target_bridge;
         
         geometry_msgs::msg::PoseStamped target_ref;
@@ -455,9 +455,9 @@ private:
 
         if(has_target_bridge){
             // I need to go to an external cluster and get to a bridge end to trespass it
-            auto target_bridge = goal->target_bridge[trespassed_bridges];
+            auto target_bridge = goal->target_bridge[crossed_bridges];
             RCLCPP_INFO(this->get_logger(),"execute:: Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
-                                                            trespassed_bridges+1, tot_bridges,
+                                                            crossed_bridges+1, tot_bridges,
                                                             target_bridge.v1, target_bridge.c1, target_bridge.r1,
                                                             target_bridge.v2, target_bridge.c2, target_bridge.r2, target_bridge.length);
             target = moveToBridge(target_bridge);
@@ -522,12 +522,12 @@ private:
                 //curr = target; curr_node=target_node;
 
                 if(has_target_bridge){
-                    // And end of a bridge has been reached as a local target and bridge has to be trespassed
+                    // And end of a bridge has been reached as a local target and bridge has to be crossed
                     // with according graph switch
 
                     RCLCPP_INFO(this->get_logger(),"execute:: one Bridge end is reached! ");
 
-                    auto& trasp_bridge = goal->target_bridge[trespassed_bridges];
+                    auto& trasp_bridge = goal->target_bridge[crossed_bridges];
 
                     RCLCPP_INFO(this->get_logger(),"execute:: Last reached node belong to: %d",curr_node.belong_to );
 
@@ -557,10 +557,10 @@ private:
                     // graph.length_matrix = getAdjMatrixof[curr_node.belong_to];
                     // graph.adj_matrix    = getAdjMatrixof[curr_node.belong_to];
 
-                    // Verify that all the bridges has been trespassed
-                    trespassed_bridges++;
-                    if(trespassed_bridges>=graph.cluster_graph.bridges.size()){
-                        // If all the bridges are trespassed i need to compute the best node 
+                    // Verify that all the bridges has been crossed
+                    crossed_bridges++;
+                    if(crossed_bridges>=graph.cluster_graph.bridges.size()){
+                        // If all the bridges are crossed i need to compute the best node 
                         // among the one of the target cluster and switch adjacency matrix
                         
 
@@ -606,10 +606,10 @@ private:
                         next_node   = graph.nodes[next];
                     }else{
                         // Here i need to switch from the previous adj matrix to the one required after
-                        // the bridge is trespassed
-                        auto new_target_bridge = goal->target_bridge[trespassed_bridges];
+                        // the bridge is crossed
+                        auto new_target_bridge = goal->target_bridge[crossed_bridges];
                         RCLCPP_INFO(this->get_logger(),"execute:: Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
-                                                trespassed_bridges+1, tot_bridges,
+                                                crossed_bridges+1, tot_bridges,
                                                 new_target_bridge.v1, new_target_bridge.c1, new_target_bridge.r1,
                                                 new_target_bridge.v2, new_target_bridge.c2, new_target_bridge.r2, new_target_bridge.length);
 
@@ -663,33 +663,33 @@ private:
             if(n!=start)
             {
                 if(graph.nodes[n].belong_to!=belong_to){ //&& graph.nodes[n].gain>0.0
-                    RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to goal belong_to R%d", n, graph.nodes[n].id, belong_to);
+                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to goal belong_to R%d", n, graph.nodes[n].id, belong_to);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue;  
                 }else if(graph.nodes[n].cluster_id!=cluster_id){
-                    RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d of R%d", n, graph.nodes[n].id,cluster_id, belong_to);
+                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d of R%d", n, graph.nodes[n].id,cluster_id, belong_to);
                     continue;
 
                 }else if (graph.nodes[n].gain==0.0)
                 {
-                    RCLCPP_INFO(this->get_logger(),"Node %d: id: %d has zero gain", n, graph.nodes[n].id);
+                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d has zero gain", n, graph.nodes[n].id);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue; 
                 }
                 
                 
                 auto [distance, path] =  dijkstraWithAdj(graph,start,n,belong_to);
-                logIntVector(this->get_logger(),path,"getBestNode:: Path to "+std::to_string(n));
+                // logIntVector(this->get_logger(),path,"getBestNode:: Path to "+std::to_string(n));
 
-                globalpath.clear();
-                for(auto n :path){
-                    globalpath.push_back(graph.nodes[n].id);
-                }
+                // globalpath.clear();
+                // for(auto n :path){
+                //     globalpath.push_back(graph.nodes[n].id);
+                // }
 
                 
-                logIntVector(this->get_logger(),globalpath,"getBestNode::Global Path to "+ std::to_string(n));
+                // logIntVector(this->get_logger(),globalpath,"getBestNode::Global Path to "+ std::to_string(n));
                 float reward = graph.nodes[n].gain / std::pow(distance, distance_exp);
-                RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d || R%d - C%d || reward: %.2f distance:%.2f", n, graph.nodes[n].id, graph.nodes[n].belong_to, graph.nodes[n].cluster_id,reward, distance);
+                //RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d || R%d - C%d || reward: %.2f distance:%.2f", n, graph.nodes[n].id, graph.nodes[n].belong_to, graph.nodes[n].cluster_id,reward, distance);
                 if(reward > max_reward)
                 {
                     max_reward = reward;
@@ -705,6 +705,15 @@ private:
         }
 
         RCLCPP_INFO(this->get_logger(), "getBestNode:: Best node -> local id: %d global id: %d", best_node, graph.nodes[best_node].id);
+        logIntVector(this->get_logger(),bestPath,"getBestNode:: Path to "+std::to_string(best_node));
+
+                globalpath.clear();
+                for(auto n :bestPath){
+                    globalpath.push_back(graph.nodes[n].id);
+                }
+
+                
+                logIntVector(this->get_logger(),globalpath,"getBestNode::Global Path to "+ std::to_string(best_node));
 
         return std::make_pair(best_node,bestPath);
     }
