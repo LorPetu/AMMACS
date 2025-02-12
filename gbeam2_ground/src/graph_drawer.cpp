@@ -52,7 +52,7 @@ public:
             std::bind(&GraphDrawer::graphCallback2, this, std::placeholders::_1));
 
         cluster_graph_sub = this->create_subscription<gbeam2_interfaces::msg::GraphCluster>(
-            "gbeam/clusters", 1,
+            "coop/Globalclusters", 1,
             std::bind(&GraphDrawer::ClusterCallback, this, std::placeholders::_1));
 
         this->declare_parameter<float>("scaling", 0.0);
@@ -296,24 +296,31 @@ private:
         std_msgs::msg::ColorRGBA walkable_color;
         walkable_color.r = 1, walkable_color.g = 0.1, walkable_color.b = 0.8, walkable_color.a = 0.15;
 
-        std_msgs::msg::ColorRGBA robot_color;
+        std::vector<std_msgs::msg::ColorRGBA> robot_color;
         std_msgs::msg::ColorRGBA white;
-        robot_color.r = 0.0; robot_color.g = 0.0; robot_color.b = 0.0; robot_color.a = 1.0;
+        robot_color.resize(N_robot);
+        for (size_t i = 0; i <N_robot; i++)
+        {
+            robot_color[i].r = 0.0; robot_color[i].g = 0.0; robot_color[i].b = 0.0; robot_color[i].a = 1.0;
 
-        // Assign a rainbow color to each marker
-        float hue = 360.0f * (static_cast<float>(name_space_id) / static_cast<float>(N_robot)); // Normalize hue [0, 360]
-        float r, g, b;
-        HSVtoRGB(hue, 1.0f, 1.0f, r, g, b); // Convert HSV to RGB (1.0f for full saturation and value)
-        robot_color.r = r; robot_color.g = g; robot_color.b = b; robot_color.a = 1.0;
+            // Assign a rainbow color to each marker
+            float hue = 360.0f * (static_cast<float>(i) / static_cast<float>(N_robot)); // Normalize hue [0, 360]
+            float r, g, b;
+            HSVtoRGB(hue, 1.0f, 1.0f, r, g, b); // Convert HSV to RGB (1.0f for full saturation and value)
+            robot_color[i].r = r; robot_color[i].g = g; robot_color[i].b = b; robot_color[i].a = 1.0;
+        }
+        
+        
 
         // Draw each centroid of the cluster
+        int i=0;
         for (auto& cluster : cluster_graph_ptr->clusters) {
             // CYLINDER marker for the cluster centroid
             visualization_msgs::msg::Marker marker;
 
             marker.header.frame_id = target_frame;
             marker.ns = "cluster_centroid";
-            marker.id = cluster.cluster_id;
+            marker.id = i;
             marker.type = visualization_msgs::msg::Marker::CYLINDER;
 
             marker.action = visualization_msgs::msg::Marker::ADD;
@@ -325,7 +332,7 @@ private:
             marker.scale.y = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
             marker.scale.z = (cluster.total_gain * gain_scale< min_cluster_size) ? min_cluster_size : cluster.total_gain * gain_scale;
 
-            marker.color = (cluster.unexplored_nodes.empty()) ? white : robot_color;
+            marker.color = (cluster.unexplored_nodes.empty()) ? white : robot_color[cluster.belong_to];
 
             
 
@@ -334,7 +341,7 @@ private:
 
             text_marker.header.frame_id = target_frame;
             text_marker.ns = "cluster_id";
-            text_marker.id = cluster.cluster_id + 1000; // Ensure unique IDs for text markers
+            text_marker.id = i + 1000; // Ensure unique IDs for text markers
             text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
 
             text_marker.action = visualization_msgs::msg::Marker::ADD;
@@ -343,16 +350,17 @@ private:
             text_marker.pose.position.y = cluster.centroid.y;
             text_marker.pose.position.z = cluster_height + (cluster.total_gain * gain_scale) + 0.5; 
 
-            text_marker.scale.z = 0.5; // Font size
+            text_marker.scale.z = 0.2; // Font size
             text_marker.color.r = 1.0; // White text
             text_marker.color.g = 1.0;
             text_marker.color.b = 1.0;
             text_marker.color.a = 1.0;
 
-            text_marker.text = std::to_string(cluster.cluster_id); // Cluster ID as text
+            text_marker.text = "C" + std::to_string(cluster.cluster_id)+"R"+std::to_string(cluster.belong_to); // Cluster ID as text
 
             text_markers.markers.push_back(text_marker);
             centroid_points.markers.push_back(marker);
+            i++;
         }
 
         // Process adjacency matrix and edges
@@ -360,7 +368,7 @@ private:
 
         for (int i = 0; i < adj_matrix.size(); i++) {
             for (int j = i + 1; j < adj_matrix.size(); j++) {
-                if (adj_matrix[i][j] != 0.0) {
+                if (adj_matrix[i][j] > 0.0) {
                     gbeam2_interfaces::msg::Vertex centr_i = cluster_graph_ptr->clusters[i].centroid;
                     centr_i.z = cluster_height;
                     gbeam2_interfaces::msg::Vertex centr_j = cluster_graph_ptr->clusters[j].centroid;
