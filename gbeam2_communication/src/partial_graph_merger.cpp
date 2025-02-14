@@ -239,35 +239,39 @@ private:
 
     }
 
-    void statusCallback(const std::shared_ptr<gbeam2_interfaces::msg::Status> status){
-        // This function compute features for every robot in the network
-        // RCLCPP_INFO(this->get_logger(), "Status received");
+    void statusCallback(const std::shared_ptr<gbeam2_interfaces::msg::Status> status) {
+        try {
+            // Check connection status 
+            if (status->connection_status[name_space_id] != 1) return;
+            last_status[status->robot_id] = *status;
 
-        // Check connection status 
-        if(status->connection_status[name_space_id]!=1) return;
-        last_status[status->robot_id]=*status;
+            double node_dist_open = 0.3; // Threshold for updating exploration gain
+            bool is_changed = false;
 
-        double node_dist_open = 0.3; //node_dist_open: 0.3
-        bool is_changed=false;
-        // Update exploration gain based on the position and the current occupied cluster
-        if(global_map.map[status->current_cluster.belong_to].nodes.empty()) return;
+            // Ensure the cluster is valid and has nodes
+            if(global_map.map[status->current_cluster.belong_to].nodes.empty()) return;
 
-        std::lock_guard<std::mutex> lock(mutex_); //is needed for simultaneous access to common resource
+            // Lock mutex to prevent concurrent access issues
+            std::lock_guard<std::mutex> lock(mutex_);
 
+            // Iterate over the cluster nodes
+            for (int id : status->current_cluster.nodes) {   
+                if (id >= static_cast<int>(global_map.map[status->current_cluster.belong_to].nodes.size())) {
+                    RCLCPP_WARN(this->get_logger(), "Node ID %d out of bounds for cluster %d", 
+                                id, status->current_cluster.belong_to);
+                    continue;
+                }
 
-        for (int id :status->current_cluster.nodes)
-        {   
-            if(id>global_map.map[status->current_cluster.belong_to].nodes.size()) continue;
+                gbeam2_interfaces::msg::Vertex& node = global_map.map[status->current_cluster.belong_to].nodes[id];
+                if (node.gain == 0.0) continue;
 
-            gbeam2_interfaces::msg::Vertex node = global_map.map[status->current_cluster.belong_to].nodes[id];
-            if(node.gain==0.0) continue;
-            auto& pos = status->current_position.pose.pose.position;
-            double dist = sqrt(pow(node.x-pos.x, 2) + pow(node.y-pos.y, 2));
-            if (dist < node_dist_open)
-            {
-                node.gain = 0;
-                node.is_visited = true;
-                bool is_present = false;
+                auto& pos = status->current_position.pose.pose.position;
+                double dist = sqrt(pow(node.x - pos.x, 2) + pow(node.y - pos.y, 2));
+
+                if (dist < node_dist_open) {
+                    node.gain = 0;
+                    node.is_visited = true;
+                    bool is_present = false;
                 // RCLCPP_INFO(this->get_logger(), "I want to update the gain of node id: %d cluster: %d of robot%d",
                 //     node.id,node.cluster_id,node.belong_to);
                 if(node.belong_to==name_space_id){
@@ -281,16 +285,24 @@ private:
                             graphBuffer[node.belong_to]->nodes.push_back(node);
                             is_changed=true;
                         }
+                    }
                 }
-                
-                
             }
+
+            // Publish updated graph if changes were made
+            if (is_changed) {
+                merged_graph_pub_->publish(global_map);
+            }
+
+            is_gain_updated = true;
+
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Exception in statusCallback: %s", e.what());
+        } catch (...) {
+            RCLCPP_ERROR(this->get_logger(), "Unknown exception in statusCallback.");
         }
-
-        if(is_changed) merged_graph_pub_->publish(global_map);
-
-        is_gain_updated=true;
     }
+
 
     void updateGlobalMap(const gbeam2_interfaces::msg::Graph graph_received){     
         // The input graph could also contains update of other graphs

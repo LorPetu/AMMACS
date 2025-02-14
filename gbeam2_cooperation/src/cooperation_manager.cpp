@@ -258,17 +258,25 @@ private:
 
   }
 
-   void computeClusterProperties2(gbeam2_interfaces::msg::GraphClusterNode& it){
+  void computeClusterProperties2(gbeam2_interfaces::msg::GraphClusterNode& it){
         // Compute centroid and total gain for the pointer to the cluster
         
         //std::vector<gbeam2_interfaces::msg::GraphClusterNode, std::allocator<gbeam2_interfaces::msg::GraphClusterNode>>::iterator it
         double sum_x = 0.0, sum_y = 0.0, sum_z = 0.0;
+        double expl_sum_x = 0.0, expl_sum_y = 0.0, expl_sum_z = 0.0;
         double tot_gain=0.0;
         for(auto& node_id:it.nodes){
             auto node_gain = stored_Graph->map[it.belong_to].nodes[node_id].gain;
+
+            // Geometrical centroid
             sum_x += stored_Graph->map[it.belong_to].nodes[node_id].x; //*node_gain;
             sum_y += stored_Graph->map[it.belong_to].nodes[node_id].y; //*node_gain;
             sum_z += stored_Graph->map[it.belong_to].nodes[node_id].z; //*node_gain;
+
+            //  Exploration weighted centroid
+            expl_sum_x += stored_Graph->map[it.belong_to].nodes[node_id].x*node_gain;
+            expl_sum_y += stored_Graph->map[it.belong_to].nodes[node_id].y*node_gain;
+            expl_sum_z += stored_Graph->map[it.belong_to].nodes[node_id].z*node_gain;
 
             tot_gain+=node_gain;
         }
@@ -278,9 +286,16 @@ private:
         int count = it.nodes.size();
         
         if (count>0){
-            it.centroid.x = sum_x / count; //tot_gain;
-            it.centroid.y = sum_y / count; //tot_gain;
-            it.centroid.z = sum_z / count; //tot_gain;
+            // Geometrical centroid
+            if (tot_gain > 1e-6) {  // Avoid division by zero
+                it.expl_centroid.x = expl_sum_x / tot_gain;
+                it.expl_centroid.y = expl_sum_y / tot_gain;
+                it.expl_centroid.z = expl_sum_z / tot_gain;
+            } else {
+                it.expl_centroid.x = it.centroid.x;
+                it.expl_centroid.y = it.centroid.y;
+                it.expl_centroid.z = it.centroid.z;
+            }
 
         }
         
@@ -322,7 +337,7 @@ private:
     //   ,stored_Graph->map[0].cluster_graph.clusters.size(),stored_Graph->map[1].cluster_graph.clusters.size());
 
     std::vector<std::vector<float>> global_adj_matrix(GlobalClusters.clusters.size(), std::vector<float>(GlobalClusters.clusters.size(), -1.0));
-    std::vector<std::vector<float>> belong_matrix(GlobalClusters.clusters.size(), std::vector<float>(GlobalClusters.clusters.size(), -1.0));
+    std::vector<std::vector<int>> number_of_bridges(GlobalClusters.clusters.size(), std::vector<int>(GlobalClusters.clusters.size(), 0));
 
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
       auto& cl_i = GlobalClusters.clusters[i];
@@ -332,6 +347,7 @@ private:
     }
     //for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
     
+    // Edges between clusters of the same robots
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
       auto& cl_i = GlobalClusters.clusters[i];
       int N = stored_Graph->map[cl_i.belong_to].cluster_graph.clusters.size();
@@ -340,26 +356,63 @@ private:
         auto& cl_j = GlobalClusters.clusters[j];
         if(cl_i.belong_to==cl_j.belong_to){
           auto local_index = cl_i.cluster_id*N+cl_j.cluster_id;
+          if (local_index >= stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data.size()) {
+              RCLCPP_ERROR(this->get_logger(), "Out-of-bounds access in length_matrix.data at index %d", local_index);
+          }
+
           auto el = stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data[local_index];
-          global_adj_matrix[i][j] = (el>1e-4) ? el: -1.0;
-          global_adj_matrix[j][i] = global_adj_matrix[i][j];
-          //belong_matrix[i][cluster_l2g_index[cl_i.belong_to][neigh_id]] = cl_i.belong_to;    
+
+          // Compute euclidean distance between expl_centroid
+          float dist_ij = dist(cl_i.expl_centroid,cl_j.expl_centroid);
+
+          global_adj_matrix[i][j] = (el>1e-4) ? dist_ij : -1.0;
+         
+          global_adj_matrix[j][i] = global_adj_matrix[i][j];  
         }else{
           // Bridges
+          global_adj_matrix[j][i] = -1.0;
         }
       }
     }
 
 
-    //printMatrix(this->get_logger(),global_adj_matrix);
-
+    RCLCPP_INFO(this->get_logger(),"Starting processing bridges...");
+    // Edges between clusters of the different robots
     for(auto& bridge : stored_Graph->map[req_robot_id].cluster_graph.bridges){
-      global_adj_matrix[cluster_l2g_index[bridge.r1][bridge.c1]][cluster_l2g_index[bridge.r2][bridge.c2]] = bridge.length;
-      global_adj_matrix[cluster_l2g_index[bridge.r2][bridge.c2]][cluster_l2g_index[bridge.r1][bridge.c1]] = bridge.length;
-      //belong_matrix[cluster_l2g_index[bridge.belong_to][bridge.c1]][cluster_l2g_index[bridge.belong_to][bridge.c2]] = bridge.belong_to;
+      int i_gl = cluster_l2g_index[bridge.r1][bridge.c1]; 
+      int j_gl = cluster_l2g_index[bridge.r2][bridge.c2];
+      auto& cl_i = GlobalClusters.clusters[i_gl];
+      auto& cl_j = GlobalClusters.clusters[j_gl];
+
+      number_of_bridges[i_gl][j_gl] +=1;
+
+      RCLCPP_INFO(this->get_logger(),"Checking connection %d - %d n_bridges: %d",i_gl,j_gl, number_of_bridges[i_gl][j_gl]);
+
+      auto& bridge_end_i = stored_Graph->map[bridge.r1].nodes[bridge.v1];
+      auto& bridge_end_j = stored_Graph->map[bridge.r2].nodes[bridge.v2];
+      // Compute euclidean distance between expl_centroid considering the bridges
+
+      float dist_ij = dist(cl_i.expl_centroid,bridge_end_i) + bridge.length + dist(cl_j.expl_centroid,bridge_end_j);
+
+      auto prev_dist = (global_adj_matrix[i_gl][j_gl]<0.0) ? INF : global_adj_matrix[i_gl][j_gl];
+
+      RCLCPP_INFO(this->get_logger(), "prev_dist: %.2f, dist_ij: %.2f", prev_dist, dist_ij);
+
+      
+      global_adj_matrix[i_gl][j_gl] = (dist_ij < prev_dist) ? dist_ij : prev_dist;
+      global_adj_matrix[j_gl][i_gl] = global_adj_matrix[i_gl][j_gl];
+
+      if(global_adj_matrix[i_gl][j_gl]==INF){
+        RCLCPP_WARN(this->get_logger(),"BRIDGE id: %d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
+                                                            bridge.id,
+                                                            bridge.v1, bridge.c1, bridge.r1,
+                                                            bridge.v2, bridge.c2, bridge.r2, bridge.length);
+      }
+      
     }
 
     GlobalClusters.bridges = stored_Graph->map[req_robot_id].cluster_graph.bridges;
+    RCLCPP_INFO(this->get_logger(),"Size of bridges in Global Clusters: %d",GlobalClusters.bridges.size());
     GlobalClusters.adj_matrix = matrix2GraphAdj(global_adj_matrix);
 
     //printMatrix(this->get_logger(),global_adj_matrix);
@@ -469,7 +522,7 @@ private:
   }
 
   std::pair<std::vector<int>,double> dijkstraWithAdjandPath(gbeam2_interfaces::msg::GraphCluster graph, int s, int t){
-    int N = graph.clusters.size();
+    int N = graph.adj_matrix.size; //graph.clusters.size();
     auto adjMatrix = graph.adj_matrix.data;
     ////RCLCPP_INFO(this->get_logger(),"Size of adjacency matrix: %d",N);
 
@@ -497,17 +550,17 @@ private:
             if(u!=v && adjMatrix[u*N + v]!=-1.0){
               //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: get access to neigh: %d of cluster %d", v,u);
               auto cl_v = graph.clusters[v];
-              double weight; 
+              double weight = adjMatrix[u*N + v]; // adj.data[i * N + j] = matrix[i][j];
               //RCLCPP_INFO(this->get_logger(),"DIJSKTRA:  %d belong to robot%d and %d belong to robot%d", v,cl_v.belong_to,u,cl_u.belong_to);
-              if(cl_u.belong_to==cl_v.belong_to){
+              // if(cl_u.belong_to==cl_v.belong_to){
                 
-                weight = adjMatrix[u*N + v]; // adj.data[i * N + j] = matrix[i][j];
-                //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: weight matrix i:%d j%d %.2f",u,v, weight);
-              }else{
-                // Get access to bridges
-                //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: bridges");
-                weight = graph.bridges[adjMatrix[u*N + v]].length;
-              }
+              //   weight = adjMatrix[u*N + v]; // adj.data[i * N + j] = matrix[i][j];
+              //   //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: weight matrix i:%d j%d %.2f",u,v, weight);
+              // }else{
+              //   // Get access to bridges
+              //   //RCLCPP_INFO(this->get_logger(),"DIJSKTRA: bridges");
+              //   weight = graph.bridges[adjMatrix[u*N + v]].length;
+              // }
 
               if (weight > 0 && dist[u] + weight < dist[v]) {
                   dist[v] = dist[u] + weight;
@@ -552,16 +605,16 @@ private:
         continue;
       }else{
         if(GlobalClusters.clusters[i].nodes.size()<3 || GlobalClusters.clusters[i].total_gain==0.0) continue; // Skip small clusters that can be merged TODO
-        //if(GlobalClusters.clusters[i].belong_to!=name_space_id) continue; // PROVVISORIO
           //RCLCPP_INFO(this->get_logger(),"cluster: %d Start searching for best cluster",i);
     
           auto [path, distance] = (i!=start) ? dijkstraWithAdjandPath(GlobalClusters,start,i) : std::make_pair(std::vector<int>{start}, 0.25);;
-          
+          RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: CLUSTER: %d - path size: %d - distance %.2f - total_gain: %.2f - number of unexplored nodes: %d",
+                                                     i, path.size(),distance,GlobalClusters.clusters[i].total_gain,GlobalClusters.clusters[i].unexplored_nodes.size());
           
           if(path.size()>0){
             double reward_avg = (GlobalClusters.clusters[i].total_gain/GlobalClusters.clusters[i].unexplored_nodes.size()) / pow(distance,exp_distance);
             //RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: CLUSTER: %d - average reward: %.2f - distance %.2f - total_gain: %.2f - number of unexplored nodes: %d",
-           //                                           i, reward_avg,distance,GlobalClusters.clusters[i].total_gain,GlobalClusters.clusters[i].unexplored_nodes.size());
+                                                    // i, reward_avg,distance,GlobalClusters.clusters[i].total_gain,GlobalClusters.clusters[i].unexplored_nodes.size());
             if(reward_avg>best_reward){
               best_cluster_id = i;
               best_path = path;
@@ -619,6 +672,8 @@ private:
     bool AreaDivision_isrequired = false;
 
     RCLCPP_INFO(this->get_logger(),"############## NEW CLUSTER EXPLORATION ##############");
+
+    printMatrix(this->get_logger(),GraphAdj2matrix(GlobalClusters.adj_matrix));
     // INITIALIZATION 
     if(start<0){
       // Node is just started
