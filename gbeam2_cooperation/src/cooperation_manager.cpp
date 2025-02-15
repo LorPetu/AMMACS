@@ -143,6 +143,11 @@ private:
   int prev_clusters_size = 0;
   bool execute_nav= false; 
   float tot_global_gain=-1;
+  int min_unexpl_size=3;
+
+  double gamma=0.5;
+
+  bool recursive=false;
 
 
   //Navigation variables
@@ -339,12 +344,35 @@ private:
     std::vector<std::vector<float>> global_adj_matrix(GlobalClusters.clusters.size(), std::vector<float>(GlobalClusters.clusters.size(), -1.0));
     std::vector<std::vector<int>> number_of_bridges(GlobalClusters.clusters.size(), std::vector<int>(GlobalClusters.clusters.size(), 0));
 
-    for(int i=0; i<GlobalClusters.clusters.size(); i++){
-      auto& cl_i = GlobalClusters.clusters[i];
-      computeClusterProperties2(cl_i);
-      curr_tot_global_gain+= cl_i.total_gain;
-      cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id] = i;
+    bool should_decrease = false;  // Flag to start decreasing min_unexpl_size
+
+    for (int i = 0; i < GlobalClusters.clusters.size(); i++) {
+        auto& cl_i = GlobalClusters.clusters[i];
+        computeClusterProperties2(cl_i);  // Compute properties of the cluster
+
+        // if (cl_i.total_gain > 0.0) {
+        //     // Check if any unexplored clusters remain larger than min_unexpl_size
+        //     if (cl_i.nodes.size() > min_unexpl_size) {
+        //         should_decrease = false;  // There's still a larger unexplored cluster
+        //     } else {
+        //         should_decrease = true;   // All unexplored clusters are now <= min_unexpl_size
+        //     }
+
+        //     // Update min_unexpl_size only when larger clusters still exist
+        //     if (!should_decrease) {
+        //         min_unexpl_size = std::min(min_unexpl_size, static_cast<int>(cl_i.nodes.size()));
+        //     }
+        // }
+
+        curr_tot_global_gain += cl_i.total_gain;
+        cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id] = i;
     }
+
+    // // If all unexplored clusters are now <= min_unexpl_size, allow it to decrease
+    // if (should_decrease) {
+    //     min_unexpl_size--;  // Reduce minimum unexplored size
+    // }
+
     //for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
     
     // Edges between clusters of the same robots
@@ -357,7 +385,7 @@ private:
         if(cl_i.belong_to==cl_j.belong_to){
           auto local_index = cl_i.cluster_id*N+cl_j.cluster_id;
           if (local_index >= stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data.size()) {
-              RCLCPP_ERROR(this->get_logger(), "Out-of-bounds access in length_matrix.data at index %d", local_index);
+              // RCLCPP_ERROR(this->get_logger(), "Out-of-bounds access in length_matrix.data at index %d", local_index);
           }
 
           auto el = stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data[local_index];
@@ -376,7 +404,7 @@ private:
     }
 
 
-    RCLCPP_INFO(this->get_logger(),"Starting processing bridges...");
+    // RCLCPP_INFO(this->get_logger(),"Starting processing bridges...");
     // Edges between clusters of the different robots
     for(auto& bridge : stored_Graph->map[req_robot_id].cluster_graph.bridges){
       int i_gl = cluster_l2g_index[bridge.r1][bridge.c1]; 
@@ -386,7 +414,7 @@ private:
 
       number_of_bridges[i_gl][j_gl] +=1;
 
-      RCLCPP_INFO(this->get_logger(),"Checking connection %d - %d n_bridges: %d",i_gl,j_gl, number_of_bridges[i_gl][j_gl]);
+      // RCLCPP_INFO(this->get_logger(),"Checking connection %d - %d n_bridges: %d",i_gl,j_gl, number_of_bridges[i_gl][j_gl]);
 
       auto& bridge_end_i = stored_Graph->map[bridge.r1].nodes[bridge.v1];
       auto& bridge_end_j = stored_Graph->map[bridge.r2].nodes[bridge.v2];
@@ -396,7 +424,7 @@ private:
 
       auto prev_dist = (global_adj_matrix[i_gl][j_gl]<0.0) ? INF : global_adj_matrix[i_gl][j_gl];
 
-      RCLCPP_INFO(this->get_logger(), "prev_dist: %.2f, dist_ij: %.2f", prev_dist, dist_ij);
+      // RCLCPP_INFO(this->get_logger(), "prev_dist: %.2f, dist_ij: %.2f", prev_dist, dist_ij);
 
       
       global_adj_matrix[i_gl][j_gl] = (dist_ij < prev_dist) ? dist_ij : prev_dist;
@@ -412,7 +440,7 @@ private:
     }
 
     GlobalClusters.bridges = stored_Graph->map[req_robot_id].cluster_graph.bridges;
-    RCLCPP_INFO(this->get_logger(),"Size of bridges in Global Clusters: %d",GlobalClusters.bridges.size());
+    // RCLCPP_INFO(this->get_logger(),"Size of bridges in Global Clusters: %d",GlobalClusters.bridges.size());
     GlobalClusters.adj_matrix = matrix2GraphAdj(global_adj_matrix);
 
     //printMatrix(this->get_logger(),global_adj_matrix);
@@ -588,37 +616,64 @@ private:
     return std::make_pair(path,dist[t]);
   }
 
+  double getInnerDistance(gbeam2_interfaces::msg::GraphClusterNode cl){
+    double max_dist = 0.25;
+    
+    return cl.unexplored_nodes.size()*(max_dist/cl.nodes.size());
+
+  }
+
   std::pair<int, std::vector<int>> getBestCluster(const int start,std::vector<int> occupied_clusters){
     // Get the best cluster to explored based on the one in which i am
     // Here we should avoid to get access to occupied cluster from "status" topic
     
     float exp_distance = 1.0;
-    double best_reward=-1.0;
+    double dist_scaling = 10.0; 
+    double best_reward =-1.0;
     int best_cluster_id=-1;
     std::vector<int> best_path;
     
-    RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: Start searching for best cluster");
+    RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: Start searching for best cluster - min unexpl size: %d", min_unexpl_size);
 
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
+      auto& cl_i = GlobalClusters.clusters[i];
       if(std::find(occupied_clusters.begin(),occupied_clusters.end(),i) != occupied_clusters.end()){
-        RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: Can't select cluster %d because is occupied",i);
+        RCLCPP_INFO(this->get_logger(),"->%d: (C%d R%d) - Can't select it because is occupied", i,cl_i.cluster_id,cl_i.belong_to);
         continue;
-      }else{
-        if(GlobalClusters.clusters[i].nodes.size()<3 || GlobalClusters.clusters[i].total_gain==0.0) continue; // Skip small clusters that can be merged TODO
+      }else{        
+        if(cl_i.nodes.size()<min_unexpl_size || cl_i.total_gain==0.0) continue; // Skip small clusters that can be merged TODO
+          
           //RCLCPP_INFO(this->get_logger(),"cluster: %d Start searching for best cluster",i);
     
-          auto [path, distance] = (i!=start) ? dijkstraWithAdjandPath(GlobalClusters,start,i) : std::make_pair(std::vector<int>{start}, 0.25);;
-          RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: CLUSTER: %d - path size: %d - distance %.2f - total_gain: %.2f - number of unexplored nodes: %d",
-                                                     i, path.size(),distance,GlobalClusters.clusters[i].total_gain,GlobalClusters.clusters[i].unexplored_nodes.size());
+          auto [path, distance] = (i!=start) ? dijkstraWithAdjandPath(GlobalClusters,start,i) : std::make_pair(std::vector<int>{start}, getInnerDistance(start_cl));
+          RCLCPP_INFO(this->get_logger(),"->%d: (C%d R%d) - path: %d - dist %.2f - tot_gain: %.2f - unexpl nodes: %d",
+                                                     i,cl_i.cluster_id,cl_i.belong_to, path.size(),distance,cl_i.total_gain,cl_i.unexplored_nodes.size());
           
           if(path.size()>0){
-            double reward_avg = (GlobalClusters.clusters[i].total_gain/GlobalClusters.clusters[i].unexplored_nodes.size()) / pow(distance,exp_distance);
+
+            double dist_from_agent = std::accumulate(last_status.begin(), last_status.end(), 0.0,
+                                      [cl_i](double sum, const gbeam2_interfaces::msg::Status& status) {
+                                          geometry_msgs::msg::PointStamped p;
+                                          p.point.x = status.last_known_target.pose.position.x;
+                                          p.point.y = status.last_known_target.pose.position.y;
+                                          p.point.z = status.last_known_target.pose.position.z;
+                                          //status.connection_status[name_space_id]*
+                                          return sum + dist(cl_i.centroid,p); 
+                                      });
+
+
+            double reward_avg = (cl_i.total_gain/cl_i.unexplored_nodes.size()) / pow(distance,exp_distance);
+            
             //RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: CLUSTER: %d - average reward: %.2f - distance %.2f - total_gain: %.2f - number of unexplored nodes: %d",
-                                                    // i, reward_avg,distance,GlobalClusters.clusters[i].total_gain,GlobalClusters.clusters[i].unexplored_nodes.size());
-            if(reward_avg>best_reward){
+                                                    // i, reward_avg,distance,cl_i.total_gain,cl_i.unexplored_nodes.size());
+            double cost = gamma*reward_avg + (1-gamma)*dist_scaling*dist_from_agent;
+
+            RCLCPP_INFO(this->get_logger(),"->%d: (C%d R%d) - agent_dist: %.2f - reward_avg: %.2f - cost: %.2f - gamma: %.2f",
+                                                    i,cl_i.cluster_id,cl_i.belong_to,dist_from_agent,reward_avg,cost,gamma);
+            if(cost>best_reward){
               best_cluster_id = i;
               best_path = path;
-              best_reward = reward_avg;
+              best_reward = cost;
               
             }
           }
@@ -671,9 +726,10 @@ private:
     
     bool AreaDivision_isrequired = false;
 
+    RCLCPP_INFO(this->get_logger(),"--------------------------------------------------");
     RCLCPP_INFO(this->get_logger(),"############## NEW CLUSTER EXPLORATION ##############");
 
-    printMatrix(this->get_logger(),GraphAdj2matrix(GlobalClusters.adj_matrix));
+    //printMatrix(this->get_logger(),GraphAdj2matrix(GlobalClusters.adj_matrix));
     // INITIALIZATION 
     if(start<0){
       // Node is just started
@@ -775,6 +831,14 @@ private:
         request->data = true;
         try_clustering_service_->async_send_request(request);
 
+        min_unexpl_size--;
+        if(min_unexpl_size>0){
+          navigationCallback(false);
+        }else{
+          RCLCPP_WARN(this->get_logger(),"No more unexplored clusters!");
+        } 
+      
+
         return;
       }
 
@@ -857,7 +921,7 @@ private:
     current_cluster_pub_->publish(target_cl);
     RCLCPP_INFO(this->get_logger(),"####################### END #######################");
     RCLCPP_INFO(this->get_logger(),"--------------------------------------------------");
-    RCLCPP_INFO(this->get_logger(),"--------------------------------------------------");
+
   }
 
   

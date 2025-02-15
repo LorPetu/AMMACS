@@ -374,7 +374,6 @@ private:
         getAdjMatrixof = goal->adj_matrix;
 
         task_completed = false;
-        int local_target =-1; // Local enumeration of nodes using index (last_reached follow the same logic)
         int crossed_bridges = 0;
         bool has_target_bridge = goal->has_target_bridge;
         
@@ -416,7 +415,7 @@ private:
             next = getMapping(next_node);
             target = getMapping(target_node); 
 
-            RCLCPP_INFO(this->get_logger(),"LAST_START: n:%d id:%d R%d || CURR: n:%d id:%d R%d || LAST_TARGET: n:%d id:%d R%d ", 
+            RCLCPP_INFO(this->get_logger(),"LS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ", 
                                 start,start_node.id,start_node.belong_to,
                                 curr,curr_node.id,curr_node.belong_to,
                                 target,target_node.id,target_node.belong_to);
@@ -442,7 +441,7 @@ private:
                 RCLCPP_WARN(this->get_logger(),"execute:: Taking the closest node  n: %d id: %d R:", curr, curr_node.id, curr_node.belong_to);
             }
 
-            RCLCPP_INFO(this->get_logger(),"NEW START: n:%d id:%d R%d || CURR: n:%d id:%d R%d || LAST_TARGET: n:%d id:%d R%d ", 
+            RCLCPP_INFO(this->get_logger(),"NS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ", 
                                 start,start_node.id,start_node.belong_to,
                                 curr,curr_node.id,curr_node.belong_to,
                                 target,target_node.id,target_node.belong_to);
@@ -454,9 +453,9 @@ private:
         // ##########################
 
         if(has_target_bridge){
-            // I need to go to an external cluster and get to a bridge end to trespass it
+            // I need to go to an external cluster and get to a bridge end to crossing it
             auto target_bridge = goal->target_bridge[crossed_bridges];
-            RCLCPP_INFO(this->get_logger(),"execute:: Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
+            RCLCPP_INFO(this->get_logger(),"->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
                                                             crossed_bridges+1, tot_bridges,
                                                             target_bridge.v1, target_bridge.c1, target_bridge.r1,
                                                             target_bridge.v2, target_bridge.c2, target_bridge.r2, target_bridge.length);
@@ -483,7 +482,7 @@ private:
             result->task_completed = task_completed;
             goal_handle->abort(result);
             active_goal_handle_ = nullptr; // Clear the active goal
-            RCLCPP_INFO(this->get_logger(), "Goal cannot be completed - empty path to local node %d",local_target);
+            RCLCPP_INFO(this->get_logger(), "Goal cannot be completed - empty path to local node %d",target);
             return;
         
         }
@@ -535,7 +534,7 @@ private:
                     int bridge_end_id = (curr_node.belong_to == trasp_bridge.r1) ? trasp_bridge.v2 : trasp_bridge.v1;
                     int bridge_end_belong_to = (curr_node.belong_to == trasp_bridge.r1) ? trasp_bridge.r2 : trasp_bridge.r1; 
 
-                    RCLCPP_INFO(this->get_logger(),"execute:: Trespass to other end... node id: %d belong to: %d",bridge_end_id,bridge_end_belong_to);
+                    RCLCPP_INFO(this->get_logger(),"execute:: crossing to other end... node id: %d belong to: %d",bridge_end_id,bridge_end_belong_to);
 
                 
                    
@@ -570,7 +569,7 @@ private:
                         target_node     =   graph.nodes[target];
                         path            =   bestpair.second;
 
-                        RCLCPP_INFO(this->get_logger(),"I from start: n:%d id:%d R%d || I want to go to TARGET: n:%d id:%d R%d but CURR: n:%d id:%d R%d ",
+                        RCLCPP_INFO(this->get_logger(),"I from start: n:%d id:%d R%d || Go to T: n:%d id:%d R%d but C: n:%d id:%d R%d ",
                                                                 start,start_node.id,start_node.belong_to,
                                                                 curr,curr_node.id,curr_node.belong_to,
                                                                 target,target_node.id,target_node.belong_to);
@@ -584,8 +583,8 @@ private:
                             globalpath.push_back(graph.nodes[n].id);
                         }
 
-                        logIntVector(this->get_logger(),path,"execute:: After bridge Path to "+ std::to_string(local_target));
-                        logIntVector(this->get_logger(),globalpath,"execute:: After bridge Global Path to "+ std::to_string(local_target));
+                        logIntVector(this->get_logger(),path,"execute:: After bridge Path to "+ std::to_string(target));
+                        logIntVector(this->get_logger(),globalpath,"execute:: After bridge Global Path to "+ std::to_string(target));
 
                         has_target_bridge = false;
 
@@ -595,7 +594,7 @@ private:
                             result->task_completed = task_completed;
                             goal_handle->abort(result);
                             active_goal_handle_ = nullptr; // Clear the active goal
-                            RCLCPP_INFO(this->get_logger(), "Goal cannot be completed - empty path to local node %d",local_target);
+                            RCLCPP_INFO(this->get_logger(), "Goal cannot be completed - empty path to local node %d",target);
                             return;
                         
                         }
@@ -608,7 +607,7 @@ private:
                         // Here i need to switch from the previous adj matrix to the one required after
                         // the bridge is crossed
                         auto new_target_bridge = goal->target_bridge[crossed_bridges];
-                        RCLCPP_INFO(this->get_logger(),"execute:: Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
+                        RCLCPP_INFO(this->get_logger(),"->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
                                                 crossed_bridges+1, tot_bridges,
                                                 new_target_bridge.v1, new_target_bridge.c1, new_target_bridge.r1,
                                                 new_target_bridge.v2, new_target_bridge.c2, new_target_bridge.r2, new_target_bridge.length);
