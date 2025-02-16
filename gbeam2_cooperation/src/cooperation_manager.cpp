@@ -832,7 +832,7 @@ private:
         try_clustering_service_->async_send_request(request);
 
         min_unexpl_size--;
-        if(min_unexpl_size>0){
+        if(min_unexpl_size>1){
           navigationCallback(false);
         }else{
           RCLCPP_WARN(this->get_logger(),"No more unexplored clusters!");

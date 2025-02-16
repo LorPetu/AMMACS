@@ -2,7 +2,7 @@ import os
 import ament_index_python
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument,IncludeLaunchDescription, GroupAction, ExecuteProcess, RegisterEventHandler, LogInfo
+from launch.actions import DeclareLaunchArgument,IncludeLaunchDescription, GroupAction, ExecuteProcess, RegisterEventHandler, LogInfo, TimerAction
 from launch.substitutions import Command
 from launch.substitutions import LaunchConfiguration
 from launch.substitutions import PythonExpression
@@ -28,6 +28,9 @@ def generate_launch_description():
     lidar_height_arg = DeclareLaunchArgument('lidar_height', default_value='0.122')
     lidar_height = LaunchConfiguration('lidar_height')
 
+    coll_bitmap_arg = DeclareLaunchArgument('coll_bitmap', default_value='0x01')
+    coll_bitmap = LaunchConfiguration('coll_bitmap')
+
     use_sim_time_arg = DeclareLaunchArgument('use_sim_time', default_value='true', description='')
     use_sim_time = LaunchConfiguration('use_sim_time')
 
@@ -43,7 +46,7 @@ def generate_launch_description():
     # Obtain urdf from xacro files.
     multi_turtlebot_sim_pkg_dir = get_package_share_directory('multi_turtlebot_sim')
     xacro_file_path = os.path.join(multi_turtlebot_sim_pkg_dir, 'urdf', 'turtlebot3_waffle.urdf.xacro')
-    robot_desc = Command(['xacro ', str(xacro_file_path), ' frame_prefix:=', robot_prefix, ' topic_prefix:=', robot_prefix, ' lidar_height_arg:=',lidar_height])
+    robot_desc = Command(['xacro ', xacro_file_path, ' frame_prefix:=', robot_prefix, ' topic_prefix:=', robot_prefix, ' lidar_height_arg:=',lidar_height, ' collision_bitmap:=',coll_bitmap])
 
     # Robot state publisher
     # This node will take the urdf description and:
@@ -77,18 +80,25 @@ def generate_launch_description():
     )
 
     # Spawn robot
-    start_gazebo_ros_spawner_cmd = Node(
+    start_gazebo_ros_spawner_cmd =  TimerAction(
+        period=2.0,
+        actions=[
+            Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
         arguments=[
             '-entity', PathJoinSubstitution([robot_prefix, 'waffle']),
-            '-topic', PathJoinSubstitution([robot_prefix, 'robot_description']),
+            '-topic', PathJoinSubstitution(['/',robot_prefix, 'robot_description']),
             '-x', x_pose,
             '-y', y_pose,
             '-z', '0.01'
         ],
         output='screen',
     )
+
+        ]
+    )
+    
 
 
 
@@ -246,16 +256,19 @@ def generate_launch_description():
 
     # Declare the launch options
     # - Arguments
+    ld.add_action(N_robot_arg)
     ld.add_action(x_pose_arg)
     ld.add_action(y_pose_arg)
     ld.add_action(lidar_height_arg)
     ld.add_action(robot_prefix_arg)
     ld.add_action(use_sim_time_arg)
+    ld.add_action(coll_bitmap_arg)
 
     # - Spawner and world interactions
     ld.add_action(robot_state_publisher)
     ld.add_action(world_static_tf)
-    ld.add_action(start_gazebo_ros_spawner_cmd)
+    ld.add_action(RegisterEventHandler(OnProcessStart(
+             target_action=robot_state_publisher, on_start=[start_gazebo_ros_spawner_cmd])))
     
     # - Groups of Nodes 
     ld.add_action(cooperative_launch)
