@@ -490,7 +490,7 @@ private:
       // TODO: use clusters_ids.size() - 1 and remove condition
       for(int i=0; i<clusters_ids.size(); i++){
         auto cl = GlobalClusters.clusters[clusters_ids[i]];
-        RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",cl.nodes.size(),cl.cluster_id);
+        RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",name_space_id,cl.nodes.size(),cl.cluster_id);
         result.cluster_graph.clusters.push_back(cl);
         for(auto& node_id:cl.nodes){
           result.nodes.push_back(stored_Graph->map[cl.belong_to].nodes[node_id]);
@@ -632,13 +632,14 @@ private:
     double best_reward =-1.0;
     int best_cluster_id=-1;
     std::vector<int> best_path;
+    int skip =name_space_id;
     
-    RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: Start searching for best cluster - min unexpl size: %d", min_unexpl_size);
+    RCLCPP_INFO(this->get_logger(),"[%d]BEST CLUSTER: Start searching for best cluster - min unexpl size: %d",name_space_id, min_unexpl_size);
 
     for(int i=0; i<GlobalClusters.clusters.size(); i++){
       auto& cl_i = GlobalClusters.clusters[i];
       if(std::find(occupied_clusters.begin(),occupied_clusters.end(),i) != occupied_clusters.end()){
-        RCLCPP_INFO(this->get_logger(),"->%d: (C%d R%d) - Can't select it because is occupied", i,cl_i.cluster_id,cl_i.belong_to);
+        RCLCPP_INFO(this->get_logger(),"[%d]->%d: (C%d R%d) - Can't select it because is occupied",name_space_id,i,cl_i.cluster_id,cl_i.belong_to);
         continue;
       }else{        
         if(cl_i.nodes.size()<min_unexpl_size || cl_i.total_gain==0.0) continue; // Skip small clusters that can be merged TODO
@@ -646,17 +647,19 @@ private:
           //RCLCPP_INFO(this->get_logger(),"cluster: %d Start searching for best cluster",i);
     
           auto [path, distance] = (i!=start) ? dijkstraWithAdjandPath(GlobalClusters,start,i) : std::make_pair(std::vector<int>{start}, getInnerDistance(start_cl));
-          RCLCPP_INFO(this->get_logger(),"->%d: (C%d R%d) - path: %d - dist %.2f - tot_gain: %.2f - unexpl nodes: %d",
+          RCLCPP_INFO(this->get_logger(),"[%d]->%d: (C%d R%d) - path: %d - dist %.2f - tot_gain: %.2f - unexpl nodes: %d",name_space_id,
                                                      i,cl_i.cluster_id,cl_i.belong_to, path.size(),distance,cl_i.total_gain,cl_i.unexplored_nodes.size());
           
           if(path.size()>0){
 
             double dist_from_agent = std::accumulate(last_status.begin(), last_status.end(), 0.0,
-                                      [cl_i](double sum, const gbeam2_interfaces::msg::Status& status) {
+                                      [cl_i,skip](double sum, const gbeam2_interfaces::msg::Status& status) {
+                                          if(status.robot_id==skip) return sum;
                                           geometry_msgs::msg::PointStamped p;
                                           p.point.x = status.last_known_target.pose.position.x;
                                           p.point.y = status.last_known_target.pose.position.y;
                                           p.point.z = status.last_known_target.pose.position.z;
+                                          
                                           //status.connection_status[name_space_id]*
                                           return sum + dist(cl_i.centroid,p); 
                                       });
@@ -668,7 +671,7 @@ private:
                                                     // i, reward_avg,distance,cl_i.total_gain,cl_i.unexplored_nodes.size());
             double cost = gamma*reward_avg + (1-gamma)*dist_scaling*dist_from_agent;
 
-            RCLCPP_INFO(this->get_logger(),"->%d: (C%d R%d) - agent_dist: %.2f - reward_avg: %.2f - cost: %.2f - gamma: %.2f",
+            RCLCPP_INFO(this->get_logger(),"[%d]->%d: (C%d R%d) - agent_dist: %.2f - reward_avg: %.2f - cost: %.2f - gamma: %.2f",name_space_id,
                                                     i,cl_i.cluster_id,cl_i.belong_to,dist_from_agent,reward_avg,cost,gamma);
             if(cost>best_reward){
               best_cluster_id = i;
@@ -705,7 +708,7 @@ private:
         if(z!=name_space_id){
           auto it = (cluster_l2g_index[last_status[z].current_cluster.belong_to].find(last_status[z].current_cluster.cluster_id));
           if(it!=cluster_l2g_index[last_status[z].current_cluster.belong_to].end()){
-            RCLCPP_INFO(this->get_logger(),"Occupied Cluster || C%d R%d || by %d global index: %d",
+            RCLCPP_INFO(this->get_logger(),"[%d]Occupied Cluster || C%d R%d || by %d global index: %d",name_space_id,
                                             last_status[z].current_cluster.cluster_id,last_status[z].current_cluster.belong_to,z,it->second);
 
             occupied_clusters.push_back(it->second);
@@ -726,8 +729,8 @@ private:
     
     bool AreaDivision_isrequired = false;
 
-    RCLCPP_INFO(this->get_logger(),"--------------------------------------------------");
-    RCLCPP_INFO(this->get_logger(),"############## NEW CLUSTER EXPLORATION ##############");
+    RCLCPP_INFO(this->get_logger(),"[%d]--------------------------------------------------",name_space_id);
+    RCLCPP_INFO(this->get_logger(),"[%d]############## NEW CLUSTER EXPLORATION ##############",name_space_id);
 
     //printMatrix(this->get_logger(),GraphAdj2matrix(GlobalClusters.adj_matrix));
     // INITIALIZATION 
@@ -763,7 +766,7 @@ private:
             if(curr!=-1){
               curr_cl = GlobalClusters.clusters[curr];
 
-              RCLCPP_INFO(this->get_logger(),"+++ I'm in global cluster %d --> id: %d belong to: %d",curr,curr_cl.cluster_id,curr_cl.belong_to);
+              RCLCPP_INFO(this->get_logger(),"[%d]+++ I'm in global cluster %d --> id: %d belong to: %d",name_space_id,curr,curr_cl.cluster_id,curr_cl.belong_to);
               AreaDivision_isrequired=true;
             }
 
@@ -787,7 +790,7 @@ private:
       start   = cluster_l2g_index[start_cl.belong_to][start_cl.cluster_id];
       curr    = cluster_l2g_index[curr_cl.belong_to][curr_cl.cluster_id];
 
-      RCLCPP_INFO(this->get_logger(),"LAST_START: %d: C%d R%d || CURR: %d: C%d R%d || LAST_TARGET: %d: C%d R%d ||", 
+      RCLCPP_INFO(this->get_logger(),"[%d]LAST_START: %d: C%d R%d || CURR: %d: C%d R%d || LAST_TARGET: %d: C%d R%d ||",name_space_id,
                                       start,start_cl.cluster_id,start_cl.belong_to,
                                       curr,curr_cl.cluster_id,curr_cl.belong_to,
                                       target,target_cl.cluster_id,target_cl.belong_to);
@@ -800,16 +803,16 @@ private:
 
       }else if(curr==start){
         // If the curr index is the same of the last start this mean that I didn't move from the last cluster
-        RCLCPP_INFO(this->get_logger(),"The current cluster is not the last target. Last Goal has not be completed!");
+        RCLCPP_INFO(this->get_logger(),"[%d]The current cluster is not the last target. Last Goal has not be completed!",name_space_id);
 
       }else{
         // Last goal was canceled during its execution
         start=curr; start_cl=curr_cl;
-        RCLCPP_INFO(this->get_logger(),"The current cluster is not the last target. Last Goal has not be completed!");
+        RCLCPP_INFO(this->get_logger(),"[%d]The current cluster is not the last target. Last Goal has not be completed!",name_space_id);
 
       }
 
-      RCLCPP_INFO(this->get_logger(),"START: %d: C%d R%d || CURR: %d: C%d R%d || TARGET: %d: C%d R%d ||", 
+      RCLCPP_INFO(this->get_logger(),"[%d]START: %d: C%d R%d || CURR: %d: C%d R%d || TARGET: %d: C%d R%d ||",name_space_id,
                                       start,start_cl.cluster_id,start_cl.belong_to,
                                       curr,curr_cl.cluster_id,curr_cl.belong_to,
                                       target,target_cl.cluster_id,target_cl.belong_to);
@@ -820,7 +823,7 @@ private:
 
       if(avoid_last_cluster){
         occupied_clusters.push_back(target);
-        RCLCPP_INFO(this->get_logger(),"Avoid last selected cluster: %d",target);
+        RCLCPP_INFO(this->get_logger(),"[%d]Avoid last selected cluster: %d",target,name_space_id);
       } 
 
       auto [best_cl_id,best_path] = getBestCluster(start,occupied_clusters);
@@ -844,7 +847,7 @@ private:
 
       auto best_cl = GlobalClusters.clusters[best_cl_id];
 
-      RCLCPP_INFO(this->get_logger(),"+ Best Cluster selected: %d C%d R%d || - %d clusters away",
+      RCLCPP_INFO(this->get_logger(),"[%d]+ Best Cluster selected: %d C%d R%d || - %d clusters away",name_space_id,
                                         best_cl_id, best_cl.cluster_id,best_cl.belong_to, best_path.size());
 
       gbeam2_interfaces::msg::Bridge bridge_to_send;
@@ -857,7 +860,7 @@ private:
           owners << " ( C" << GlobalClusters.clusters[id].cluster_id << " - R" <<GlobalClusters.clusters[id].belong_to << " ) -";
       }
       owners << "> STOP";
-      RCLCPP_INFO(this->get_logger(),"+ Path: %s",owners.str().c_str());
+      RCLCPP_INFO(this->get_logger(),"[%d]+ Path: %s",name_space_id,owners.str().c_str());
 
       // is the current cluster the best? 
       // BEST CLUSTER SEARCH 
@@ -869,7 +872,7 @@ private:
           target = best_cl_id;
           target_cl = best_cl;
           
-          RCLCPP_INFO(this->get_logger(),"+++ AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",GlobalClusters.clusters[target].belong_to, target);
+          RCLCPP_INFO(this->get_logger(),"[%d]+++ AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",name_space_id,GlobalClusters.clusters[target].belong_to, target);
           
           AreaDivision_isrequired = true;
 
@@ -880,14 +883,14 @@ private:
         }else{          
           target = best_cl_id;
           target_cl = best_cl;
-          RCLCPP_INFO(this->get_logger(),"+++ Select cluster of mine with id: %d",target);
+          RCLCPP_INFO(this->get_logger(),"[%d]+++ Select cluster of mine with id: %d",name_space_id,target);
           
 
           send_goal(clusters_to_send,target_cl);
           
         }
       }else{
-        RCLCPP_INFO(this->get_logger(),"++ Mantain last selected id: %d",target);
+        RCLCPP_INFO(this->get_logger(),"[%d]++ Mantain last selected id: %d",name_space_id,target);
         send_goal(clusters_to_send,target_cl);
       }
       
@@ -908,7 +911,7 @@ private:
     target_cl = GlobalClusters.clusters[target];
     start_cl = GlobalClusters.clusters[start];
 
-    RCLCPP_INFO(this->get_logger(),"START: %d: C%d R%d || CURR: %d: C%d R%d || TARGET: %d: C%d R%d ||", 
+    RCLCPP_INFO(this->get_logger(),"[%d]START: %d: C%d R%d || CURR: %d: C%d R%d || TARGET: %d: C%d R%d ||", name_space_id,
                                       start,start_cl.cluster_id,start_cl.belong_to,
                                       curr,curr_cl.cluster_id,curr_cl.belong_to,
                                       target,target_cl.cluster_id,target_cl.belong_to);
@@ -919,8 +922,8 @@ private:
     // Publish to status the current cluster
     target_cl.is_target = true;
     current_cluster_pub_->publish(target_cl);
-    RCLCPP_INFO(this->get_logger(),"####################### END #######################");
-    RCLCPP_INFO(this->get_logger(),"--------------------------------------------------");
+    RCLCPP_INFO(this->get_logger(),"[%d]####################### END #######################",name_space_id);
+    RCLCPP_INFO(this->get_logger(),"[%d]--------------------------------------------------",name_space_id);
 
   }
 
@@ -945,7 +948,7 @@ private:
       static int prev_cluster_id = -1;
 
       if (feedback->curr_vert.id != prev_id || feedback->curr_vert.cluster_id != prev_cluster_id) {
-          RCLCPP_INFO(this->get_logger(), "Current node visited id: %d C%d R%d",
+          RCLCPP_INFO(this->get_logger(), "[%d]Current node visited id: %d C%d R%d", name_space_id,
                       feedback->curr_vert.id, feedback->curr_vert.cluster_id,feedback->curr_vert.belong_to);
           prev_id = feedback->curr_vert.id;
           prev_cluster_id = feedback->curr_vert.cluster_id;
@@ -1018,6 +1021,7 @@ private:
       goal_msg.adj_matrix.push_back(stored_Graph->map[z].length_matrix);
     }
     
+    goal_msg.last_status = last_status;
     
     
 

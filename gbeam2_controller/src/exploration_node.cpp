@@ -52,6 +52,7 @@ public:
     explicit ExplorationNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions()) : Node("graph_expl",options), active_goal_handle_(nullptr)
     {   
         name_space = this->get_namespace();
+        name_space_id = name_space.back()- '0';
         // graph_subscriber_ = this->create_subscription<gbeam2_interfaces::msg::Graph>(
         //     "gbeam/reachability_graph", 1, std::bind(&ExplorationNode::graphCallback, this, std::placeholders::_1));
 
@@ -124,6 +125,7 @@ private:
     int N=0, E=0; 
     int mapping_z = 5;
     int N_robot;
+    int name_space_id;
     
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};
     
@@ -142,6 +144,8 @@ private:
 
     std::vector<int> path;
     std::vector<int> globalpath;
+
+    std::vector<gbeam2_interfaces::msg::Status> last_status;
 
     // Action
     rclcpp_action::Server<Task>::SharedPtr action_server_;
@@ -274,17 +278,17 @@ private:
         int bridge_end_id = (start_node.belong_to == target_bridge.r1) ? target_bridge.v1 : target_bridge.v2;
         int bridge_end_belong_to = (start_node.belong_to == target_bridge.r1) ? target_bridge.r1 : target_bridge.r2;
 
-        RCLCPP_INFO(this->get_logger(),"MoveToBridge:: bridge end id: %d", bridge_end_id);
+        RCLCPP_INFO(this->get_logger(),"[%d]MoveToBridge:: bridge end id: %d", name_space_id, bridge_end_id);
 
         auto it = new_mapping[bridge_end_belong_to].find(bridge_end_id);
         if(it!=new_mapping[bridge_end_belong_to].end()){
             // I have a corresponding mapping
             local_target = it->second;
-            RCLCPP_INFO(this->get_logger(), "MoveToBridge:: bridge end remapping n: %d", local_target);
+            RCLCPP_INFO(this->get_logger(), "[%d]MoveToBridge:: bridge end remapping n: %d",name_space_id, local_target);
         }else{
-            RCLCPP_WARN(this->get_logger(), "MoveToBridge:: No mapping for this bridge end.");
+            RCLCPP_WARN(this->get_logger(), "[%d]MoveToBridge:: No mapping for this bridge end.",name_space_id);
         } 
-        RCLCPP_INFO(this->get_logger(),"MoveToBridge:: bridge end id: %d local target: %d", bridge_end_id,local_target);
+        RCLCPP_INFO(this->get_logger(),"[%d]MoveToBridge:: bridge end id: %d local target: %d", name_space_id, bridge_end_id,local_target);
 
         // Compute the path from the last reached node (curr_node) and the the end to that bridge (local_target)
         path = dijkstraWithAdj(graph, start, local_target,bridge_end_belong_to).second;
@@ -372,6 +376,7 @@ private:
         graph = goal->assigned_graph;
         N = graph.nodes.size();
         getAdjMatrixof = goal->adj_matrix;
+        last_status = goal->last_status;
 
         task_completed = false;
         int crossed_bridges = 0;
@@ -382,9 +387,9 @@ private:
         auto feedback = std::make_shared<Task::Feedback>();        
         auto result = std::make_shared<Task::Result>();
         
-        RCLCPP_INFO(this->get_logger(),"Execute goal: #################NEW GOAL################");
-        RCLCPP_INFO(this->get_logger(),"Execute goal: explore cluster %d of robot%d",goal->cluster_id_task, goal->belong_to);
-        RCLCPP_INFO(this->get_logger(),"Execute goal: ########################################");
+        RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: #################NEW GOAL################" ,name_space_id);
+        RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: explore cluster %d of robot%d", name_space_id,goal->cluster_id_task, goal->belong_to);
+        RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: ########################################" ,name_space_id);
 
         // -- Remapping all the nodes index
         for(int z=0;z<N_robot;z++){new_mapping[z].clear();}
@@ -415,7 +420,7 @@ private:
             next = getMapping(next_node);
             target = getMapping(target_node); 
 
-            RCLCPP_INFO(this->get_logger(),"LS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ", 
+            RCLCPP_INFO(this->get_logger(),"[%d]LS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ",  name_space_id,
                                 start,start_node.id,start_node.belong_to,
                                 curr,curr_node.id,curr_node.belong_to,
                                 target,target_node.id,target_node.belong_to);
@@ -441,7 +446,7 @@ private:
                 RCLCPP_WARN(this->get_logger(),"execute:: Taking the closest node  n: %d id: %d R:", curr, curr_node.id, curr_node.belong_to);
             }
 
-            RCLCPP_INFO(this->get_logger(),"NS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ", 
+            RCLCPP_INFO(this->get_logger(),"[%d]NS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ",  name_space_id,
                                 start,start_node.id,start_node.belong_to,
                                 curr,curr_node.id,curr_node.belong_to,
                                 target,target_node.id,target_node.belong_to);
@@ -455,7 +460,7 @@ private:
         if(has_target_bridge){
             // I need to go to an external cluster and get to a bridge end to crossing it
             auto target_bridge = goal->target_bridge[crossed_bridges];
-            RCLCPP_INFO(this->get_logger(),"->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
+            RCLCPP_INFO(this->get_logger(),"[%d]->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ",  name_space_id,
                                                             crossed_bridges+1, tot_bridges,
                                                             target_bridge.v1, target_bridge.c1, target_bridge.r1,
                                                             target_bridge.v2, target_bridge.c2, target_bridge.r2, target_bridge.length);
@@ -465,7 +470,7 @@ private:
         }else{
             // Client doesn't specify any particular target node, just need to explore a cluster
             // At start select the best node and compute the path to it
-            //RCLCPP_INFO(this->get_logger(),"execute:: Search for the best Node");
+            //RCLCPP_INFO(this->get_logger(),"[%d]execute:: Search for the best Node");
 
             auto bestpair = getBestNode(goal->cluster_id_task, goal->belong_to);
 
@@ -524,17 +529,17 @@ private:
                     // And end of a bridge has been reached as a local target and bridge has to be crossed
                     // with according graph switch
 
-                    RCLCPP_INFO(this->get_logger(),"execute:: one Bridge end is reached! ");
+                    RCLCPP_INFO(this->get_logger(),"[%d]execute:: one Bridge end is reached! ",name_space_id);
 
                     auto& trasp_bridge = goal->target_bridge[crossed_bridges];
 
-                    RCLCPP_INFO(this->get_logger(),"execute:: Last reached node belong to: %d",curr_node.belong_to );
+                    RCLCPP_INFO(this->get_logger(),"[%d]execute:: Last reached node belong to: %d",name_space_id,curr_node.belong_to );
 
                     // Enumeration based on the owner of the OTHER end
                     int bridge_end_id = (curr_node.belong_to == trasp_bridge.r1) ? trasp_bridge.v2 : trasp_bridge.v1;
                     int bridge_end_belong_to = (curr_node.belong_to == trasp_bridge.r1) ? trasp_bridge.r2 : trasp_bridge.r1; 
 
-                    RCLCPP_INFO(this->get_logger(),"execute:: crossing to other end... node id: %d belong to: %d",bridge_end_id,bridge_end_belong_to);
+                    RCLCPP_INFO(this->get_logger(),"[%d]execute:: crossing to other end... node id: %d belong to: %d",name_space_id,bridge_end_id,bridge_end_belong_to);
 
                 
                    
@@ -544,7 +549,7 @@ private:
                         // I have a corresponding mapping
                         start = it->second;
                         start_node =graph.nodes[start];
-                        RCLCPP_INFO(this->get_logger(),"execute:: New Mapping of the bridge end is n: %d id: %d", new_mapping[bridge_end_belong_to][bridge_end_id], bridge_end_id);
+                        RCLCPP_INFO(this->get_logger(),"[%d]execute:: New Mapping of the bridge end is n: %d id: %d",name_space_id,new_mapping[bridge_end_belong_to][bridge_end_id], bridge_end_id);
                     }else{
                         start_node = vert_graph_distance_noobstacle(graph,getCurrPos()).second; 
                         start = start_node.id;
@@ -569,7 +574,7 @@ private:
                         target_node     =   graph.nodes[target];
                         path            =   bestpair.second;
 
-                        RCLCPP_INFO(this->get_logger(),"I from start: n:%d id:%d R%d || Go to T: n:%d id:%d R%d but C: n:%d id:%d R%d ",
+                        RCLCPP_INFO(this->get_logger(),"[%d]I from start: n:%d id:%d R%d || Go to T: n:%d id:%d R%d but C: n:%d id:%d R%d ",name_space_id,
                                                                 start,start_node.id,start_node.belong_to,
                                                                 curr,curr_node.id,curr_node.belong_to,
                                                                 target,target_node.id,target_node.belong_to);
@@ -607,7 +612,7 @@ private:
                         // Here i need to switch from the previous adj matrix to the one required after
                         // the bridge is crossed
                         auto new_target_bridge = goal->target_bridge[crossed_bridges];
-                        RCLCPP_INFO(this->get_logger(),"->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
+                        RCLCPP_INFO(this->get_logger(),"[%d]->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", name_space_id,
                                                 crossed_bridges+1, tot_bridges,
                                                 new_target_bridge.v1, new_target_bridge.c1, new_target_bridge.r1,
                                                 new_target_bridge.v2, new_target_bridge.c2, new_target_bridge.r2, new_target_bridge.length);
@@ -655,23 +660,27 @@ private:
         float max_reward = 0.0;
         int best_node = -1;
         std::vector<int> bestPath;
+        double gamma = 0.3;
+        int skip=name_space_id;
+        double dist_scaling = 1.0;
 
 
         for(size_t n = 0; n < N; n++)
         {
             if(n!=start)
             {
-                if(graph.nodes[n].belong_to!=belong_to){ //&& graph.nodes[n].gain>0.0
-                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to goal belong_to R%d", n, graph.nodes[n].id, belong_to);
+                auto& node_n =graph.nodes[n];
+                if(node_n.belong_to!=belong_to){ //&& node_n.gain>0.0
+                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to goal belong_to R%d", n, node_n.id, belong_to);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue;  
-                }else if(graph.nodes[n].cluster_id!=cluster_id){
-                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d of R%d", n, graph.nodes[n].id,cluster_id, belong_to);
+                }else if(node_n.cluster_id!=cluster_id){
+                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d does not belong to cluster %d of R%d", n, node_n.id,cluster_id, belong_to);
                     continue;
 
-                }else if (graph.nodes[n].gain==0.0)
+                }else if (node_n.gain==0.0)
                 {
-                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d has zero gain", n, graph.nodes[n].id);
+                    //RCLCPP_INFO(this->get_logger(),"Node %d: id: %d has zero gain", n, node_n.id);
                     // Skip unreachable nodes and the ones that doesn't belong to the specified cluster
                     continue; 
                 }
@@ -680,15 +689,32 @@ private:
                 auto [distance, path] =  dijkstraWithAdj(graph,start,n,belong_to);
                 // logIntVector(this->get_logger(),path,"getBestNode:: Path to "+std::to_string(n));
 
-                // globalpath.clear();
-                // for(auto n :path){
-                //     globalpath.push_back(graph.nodes[n].id);
-                // }
+                double dist_from_agent = std::accumulate(last_status.begin(), last_status.end(), 0.0,
+                                      [skip,node_n](double sum, const gbeam2_interfaces::msg::Status& status) {
+                                          if(status.robot_id==skip) return sum;
+                                          geometry_msgs::msg::PointStamped p;
+                                          p.point.x = status.last_known_target.pose.position.x;
+                                          p.point.y = status.last_known_target.pose.position.y;
+                                          p.point.z = status.last_known_target.pose.position.z;
+                                          
+                                          //status.connection_status[name_space_id]*
+                                          return sum + dist(node_n,p); 
+                                      });
+
+
+                 float reward = node_n.gain / std::pow(distance, distance_exp);
+                
+                //RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: CLUSTER: %d - average reward: %.2f - distance %.2f - total_gain: %.2f - number of unexplored nodes: %d",
+                                                        // i, reward_avg,distance,cl_i.total_gain,cl_i.unexplored_nodes.size());
+                double cost = gamma*reward + (1-gamma)*dist_scaling*dist_from_agent;
+                RCLCPP_INFO(this->get_logger(),"[%d] node %d-> (%d C%d R%d) dist: %.2f reward: %.2f cost: %.2f",name_space_id,
+                                                            n,node_n.id, node_n.cluster_id,node_n.belong_to,
+                                                            dist_from_agent,reward,cost);
 
                 
                 // logIntVector(this->get_logger(),globalpath,"getBestNode::Global Path to "+ std::to_string(n));
-                float reward = graph.nodes[n].gain / std::pow(distance, distance_exp);
-                //RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d || R%d - C%d || reward: %.2f distance:%.2f", n, graph.nodes[n].id, graph.nodes[n].belong_to, graph.nodes[n].cluster_id,reward, distance);
+               
+                //RCLCPP_INFO(this->get_logger(),"getBestNode:: Node %d: id: %d || R%d - C%d || reward: %.2f distance:%.2f", n, node_n.id, node_n.belong_to, node_n.cluster_id,reward, distance);
                 if(reward > max_reward)
                 {
                     max_reward = reward;

@@ -103,7 +103,7 @@ def generate_launch_description():
         # Create TimerActions dynamically
         for idx, (x_pose, y_pose) in enumerate(parsed_positions[:num_robots_value]):  # Ensure we respect num_robots
             namespace = f'robot{idx}'
-            lidar_height = 0.1 + (idx * 0.2)  # Example lidar height variation
+            lidar_height = 0.17 + (idx * 0.2)  # Example lidar height variation
             bitmap= f'0x{idx}0'
 
             actions.append(TimerAction(
