@@ -12,7 +12,6 @@
       limit_ys: 2.5               #1.0
       N_robot: 2 
 
-
 /**/poly_gen:
   ros__parameters:
     update_freq: 2.0 # Hz     #2.0
@@ -21,6 +20,7 @@
     start_dist: 0.15 #0.15  # m
     obstacle_d_thr: 0.1    # 0.05  # m
     obst_dist_min: 0.1 #m
+    rotating_poly: false
 
 /**/graph_update:
   ros__parameters:

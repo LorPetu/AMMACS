@@ -67,6 +67,7 @@ public:
     this->declare_parameter<double>("update_freq",2.0);
     this->declare_parameter<float>("obst_dist_min", 0.0);
     this->declare_parameter<double>("node_dist_open", 0.0);
+    this->declare_parameter<bool>("rotating_poly",false);
     
 
     // Get parameter from yaml file
@@ -78,6 +79,7 @@ public:
     update_freq = this->get_parameter("update_freq").get_parameter_value().get<double>();
     obst_dist_min = this->get_parameter("obst_dist_min").get_parameter_value().get<double>();
     node_dist_open = this->get_parameter("node_dist_open").get_parameter_value().get<double>();
+    rotating_polygon = this->get_parameter("rotating_poly").as_bool();
 
     RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF POLYTOPE_GEN: ############# ");
     RCLCPP_INFO(this->get_logger(),"1) NUM_VERTICES: %d", num_vertices);
@@ -88,6 +90,7 @@ public:
     RCLCPP_INFO(this->get_logger(),"6) UPDATE_FREQ: %f", update_freq);
     RCLCPP_INFO(this->get_logger(),"7) OBST_DIST_MIN: %f", obst_dist_min);
     RCLCPP_INFO(this->get_logger(),"8) NODE_DIST_OPEN: %f", node_dist_open);
+    RCLCPP_INFO(this->get_logger(),"9) Rotating polygon: %s", rotating_polygon ? "true" : "false");
 
 
     timer_ = this->create_wall_timer(
@@ -96,6 +99,9 @@ public:
   }
 
 private:
+  // Global boolean
+  bool rotating_polygon;
+
   int num_vertices;
   double dist_step;
   double safe_dist;
@@ -196,14 +202,16 @@ private:
 
         for(int v=0; v<num_vertices; v++)
           {
-            float vert_angle = v*angle_diff_vert + angle_diff_vert/2;// + offset_angle;
+            float vert_angle = v*angle_diff_vert + angle_diff_vert/2 + ((rotating_polygon) ? offset_angle : 0);
             vert_directions[v].x = cos(vert_angle);
             vert_directions[v].y = sin(vert_angle);
             vert_directions[v].z = 0;
           }
+        if(rotating_polygon){
+          offset_angle+=10;
+          if(offset_angle==360) offset_angle=0;
+        }
         
-        //offset_angle+=10;
-        //if(offset_angle==360) offset_angle=0;
       //-------------------------------------------------------------------------------------------------
 
 
