@@ -24,26 +24,32 @@ def launch_spawn_gbeam2(namespace, lidar, x_pose, y_pose,num_robot,bitmap):
                 )
     return launch
 
-def recordBagfor(N_robot,sim_name):
-    # Get the current date and time in a format suitable for filenames
+def recordBagfor(N_robot, sim_name):
+    """Records a ROS 2 bag for a given number of robots and a simulation name."""
+    
+    # Get the current timestamp
     timestamp = datetime.now().strftime("%m-%d_%H-%M-%S")
-
-    # Define the bag directory in a safe way
     bag_dir = os.path.join('rosbags', f"{timestamp}_{sim_name}")
 
-    target_topics = ['gbeam/merged_graph','scan','gbeam/target_pos_ref','gbeam/gbeam_pos_ref']
+    # Topics to record
+    target_topics = [
+        'scan', 'gbeam/reachability_graph', 'gbeam/merged_graph', 'gbeam/target_pos_ref',
+        'gbeam/gbeam_pos_ref', 'coop/Globalclusters', 'timers', 'external_nodes', 'Task'
+    ]
 
-    topic_to_record =[]
+    topic_to_record = []
 
-    for i in range(N_robot) :
+    for i in range(N_robot):
         namespace = f'robot{i}'
         for topic in target_topics:
             topic_to_record.append(f'{namespace}/{topic}')
 
+    # Global topic 
     topic_to_record.append('/status')
+    topic_to_record.append('/tf')
 
     return ExecuteProcess(
-        cmd=['ros2', 'bag', 'record', '--output', ''.join(bag_dir), topic_to_record],
+        cmd=['ros2', 'bag', 'record', '--output', bag_dir] + topic_to_record,
         output='screen'
     )
 
