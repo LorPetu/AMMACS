@@ -10,6 +10,7 @@
       limit_xs:  2.5              #1.0
       limit_yi:  -2.5             #-1.0
       limit_ys: 2.5               #1.0
+      N_robot: 2 
 
 
 /**/poly_gen:

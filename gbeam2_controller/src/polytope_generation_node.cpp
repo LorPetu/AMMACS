@@ -279,22 +279,16 @@ private:
         vert_obs.x = poly.polygon.points[v].x;
         vert_obs.y = poly.polygon.points[v].y;
         vert_obs.z = poly.polygon.points[v].z;
-        float exp_gain = 0;
+        float exp_gain = 0.0;
         int vert_obstacles = num_measurements/num_vertices;
         for (int o=(v*vert_obstacles); o<((v+1)*vert_obstacles); o++)
         {
           if (scan->ranges[o] >= scan->range_max)
           exp_gain++;
           float step = abs(scan->ranges[o]-scan->ranges[o+1]);
-          float tmp = step>scan->range_max ? 0 : step / obst_dist_min;
-          if(tmp>1){
-            //ROS_INFO("vertex: %d   ## tmp value: %f", v, tmp);
-            //ROS_INFO("Vertex position: x:%f  y:%f",vert_obs.x,vert_obs.y);
-            //ROS_INFO("range_max: %f", scan->range_max);
-          }
-          
+          float tmp = step>scan->range_max ? 0 : step / obst_dist_min;          
 
-          exp_gain += tmp>1 ? tmp : 0;
+          exp_gain += tmp>1 ? tmp : 0.0;
         }
         vert_obs.gain = exp_gain;
         vert_obs.is_visited = false;
@@ -334,7 +328,7 @@ private:
             vert_in.x = fraction*vert_reach.x;
             vert_in.y = fraction*vert_reach.y;
             vert_in.z = vert_reach.x;
-            vert_in.gain = 0;
+            vert_in.gain = 0.0;
             vert_in.is_visited = false;
             vert_in.is_reachable = false;
             vert_in.is_obstacle = false;

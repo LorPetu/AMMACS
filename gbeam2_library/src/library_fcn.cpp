@@ -6,6 +6,8 @@
 #include "geometry_msgs/msg/vector3.h"
 #include "sensor_msgs/msg/point_cloud.h"
 #include <cmath>
+#include <queue>
+#include <vector>
 #include <limits>
 
 // infinite for raytracing
@@ -104,11 +106,11 @@ bool onSegment(geometry_msgs::msg::Point32 p, geometry_msgs::msg::Point32 q, geo
 // Find orientation of ordered triplet (p, q, r)
 // 0 --> p, q and r are colinear
 // 1 --> Clockwise
-// 2 --> Counterclockwise
+// -1 --> Counterclockwise
 int orientation(geometry_msgs::msg::Point32 p, geometry_msgs::msg::Point32 q, geometry_msgs::msg::Point32 r)
 {
     float val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-    return (val > 0) ? 1 : ((val<0) ? 2 : 0);
+    return (val > 0) ? 1 : ((val<0) ? -1 : 0);
 }
 // Check intersection between segment 'p1q1' and 'p2q2'
 bool doIntersect(geometry_msgs::msg::Point32 p1, geometry_msgs::msg::Point32 q1, geometry_msgs::msg::Point32 p2, geometry_msgs::msg::Point32 q2)
@@ -455,10 +457,10 @@ float vert_graph_distance(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces
 }
 
 // compute minimum distance between vertex v and graph nodes
-std::pair<float,int> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v)
+std::pair<float,gbeam2_interfaces::msg::Vertex> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v)
 {
   float d_min = INF;
-  int id_min = -1;
+  gbeam2_interfaces::msg::Vertex vert = gbeam2_interfaces::msg::Vertex();
   for (int i=0; i<graph.nodes.size(); i++)
   {
     if(!graph.nodes[i].is_obstacle)
@@ -466,11 +468,11 @@ std::pair<float,int> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Grap
       float d = dist(graph.nodes[i], v);
       if (d < d_min){
         d_min = d;
-        id_min = graph.nodes[i].id;
+        vert = graph.nodes[i];
       }
     }
   }
-  return std::make_pair(d_min,id_min);
+  return std::make_pair(d_min,vert);
 }
 
 // compute minimum distance between vertex v and graph nodes
@@ -868,6 +870,102 @@ void shortestDistances(gbeam2_interfaces::msg::Graph graph, float dist[], int st
 
   return;
 }
+
+void shortestDistancesWithAdjMatrix(gbeam2_interfaces::msg::Graph graph, float dist[], int start) {
+    // This function is used in a context in which node id doesn't correspond to the index postion of
+    // graph.nodes array. And also the adjacency matrix should be used with id and not the index
+    int N = graph.nodes.size();
+    auto adjMatrix = graph.adj_matrix.data; // Assuming row-major adjacency matrix
+    bool Q_set[N];
+    int prev[N];
+
+    // Initialize distances and visited sets
+    for (int i = 0; i < N; i++) {
+        dist[i] = INF;
+        prev[i] = -1;
+        Q_set[i] = graph.nodes[i].is_reachable; // Add to Q_set only if node is reachable
+    }
+
+    dist[start] = 0;
+
+    // Main Dijkstra loop
+    for (int count = 0; count < N; count++) {
+        int u = iMinCon(dist, Q_set, N); // Select the node with the shortest distance
+        if (u == -1) break;             // If no valid node is found, terminate early
+
+        Q_set[u] = false; // Remove selected node from Q_set
+
+        // Explore neighbors via adjacency matrix
+        int u_id = graph.nodes[u].id;
+        for (int v = 0; v < N; v++) {
+          int v_id = graph.nodes[u].id;
+          float weight = adjMatrix[u_id * N + v_id]; // Access weight of edge u -> v
+            if (Q_set[v] && weight > 0 && dist[v] > dist[u] + weight) {
+                dist[v] = dist[u] + weight; // Update shortest distance
+                prev[v] = u;               // Update predecessor
+            }
+        }
+    }
+
+    // `dist` now contains the shortest distances from `start` to all nodes
+    // `prev` contains the shortest path tree (predecessors for path reconstruction)
+}
+
+
+
+
+// std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t)
+// {
+//   int N = graph.nodes.size();
+//   int E = graph.adj_matrix.size;
+//   auto adjMatrix = graph.adj_matrix.data;
+
+//   // Since we're considering only reachable node we skip the filtering part.
+
+//   std::vector<double> dist(N, INF);
+//   std::vector<int> parent(N, -1); // To store the shortest path tree
+//   std::priority_queue<std::pair<double, int>, std::vector<std::pair<double, int>>, std::greater<>> pq;
+
+//   dist[s] = 0;
+//   pq.push({0, s});
+
+
+//   while (!pq.empty()) {
+//         auto [currentDist, u] = pq.top();
+//         pq.pop();
+
+//         // If the distance is already larger, skip
+//         if (currentDist > dist[u]) continue;
+
+//         int u_id = graph.nodes[u].id;
+
+//         // Explore neighbors
+//         for (int v = 0; v < N; v++) {
+//           int v_id = graph.nodes[v].id;
+//             double weight = adjMatrix[u_id*N + v_id]; // adj.data[i * N + j] = matrix[i][j];
+//             if (weight > 0 && dist[u] + weight < dist[v]) {
+//                 dist[v] = dist[u] + weight;
+//                 parent[v] = u;
+//                 pq.push({dist[v], v});
+//             }
+//         }
+//     }
+
+//     std::vector<int> path;
+//     for (int at = t; at != -1; at = parent[at]) {
+//         path.push_back(at);
+//     }
+//     std::reverse(path.begin(), path.end()); // Reverse to get the path from source to target
+
+//     // Check if the path starts with the source
+//     if (!path.empty() && path[0] == s) {
+//         return path;
+//     }
+//     return {}; // Return empty if there's no valid path
+
+
+//     return path;
+// }
 
 // compute shortest path in graph from start to end
 // using Dijkstra algorithm

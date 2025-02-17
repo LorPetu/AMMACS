@@ -41,7 +41,12 @@ public:
 
         status_sub_ = this->create_subscription<gbeam2_interfaces::msg::Status>(
             "/status", 1,
-            std::bind(&CommDrawer::statusCallback, this, std::placeholders::_1));      
+            std::bind(&CommDrawer::statusCallback, this, std::placeholders::_1));  
+
+        robot_triangle_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/status_visualization/robot_triangle", 1);
+
+        robot_triangle_cluster_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/status_visualization/robot_triangle_cluster", 1);
+    
 
         
 
@@ -61,12 +66,53 @@ public:
         RCLCPP_INFO(this->get_logger(),"3) Communication range: %f",wifi_range);
 
         curr_status.resize(N_robot);
+
+        
+
+        robot_color.resize(N_robot);
+        for (size_t i = 0; i <N_robot; i++)
+        {
+            robot_color[i].r = 0.0; robot_color[i].g = 0.0; robot_color[i].b = 0.0; robot_color[i].a = 1.0;
+
+            // Assign a rainbow color to each marker
+            float hue = 360.0f * (static_cast<float>(i) / static_cast<float>(N_robot)); // Normalize hue [0, 360]
+            float r, g, b;
+
+            // Convert HSV to RGB (1.0f for full saturation and value)
+            
+
+            float c = 1.0f * 1.0f; // Chroma
+            float x = c * (1 - std::fabs(std::fmod(hue / 60.0, 2) - 1));
+            float m = 1.0f - c;
+
+            if (hue >= 0 && hue < 60) {
+                r = c, g = x, b = 0;
+            } else if (hue >= 60 && hue < 120) {
+                r = x, g = c, b = 0;
+            } else if (hue >= 120 && hue < 180) {
+                r = 0, g = c, b = x;
+            } else if (hue >= 180 && hue < 240) {
+                r = 0, g = x, b = c;
+            } else if (hue >= 240 && hue < 300) {
+                r = x, g = 0, b = c;
+            } else {
+                r = c, g = 0, b = x;
+            }
+
+            r += m;
+            g += m;
+            b += m;
+        
+            robot_color[i].r = r; robot_color[i].g = g; robot_color[i].b = b; robot_color[i].a = 1.0;
+        }
         for (int i = 0; i < N_robot; i++)
         {
             curr_status[i].connection_status.resize(N_robot);
             curr_status[i].joint_vector.resize(N_robot);
             curr_status[i].normal_joint_vector.resize(N_robot);
         }
+
+
   
 
     }
@@ -75,83 +121,22 @@ private:
 
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr joint_vectors_pub_; 
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr joint_line_pub_; 
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr frontier_line_pub_; 
+
     rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr frontier_point_pub_;
+
+    // Publisher for triangle marker
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr robot_triangle_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr robot_triangle_cluster_pub_;
+
+
 
     float scaling;
     int N_robot;
     double wifi_range;
     std::vector<gbeam2_interfaces::msg::Status> curr_status;
 
-    sensor_msgs::msg::PointCloud2 pointCloudTOpointCloud2(const sensor_msgs::msg::PointCloud msg)
-    {
-        sensor_msgs::msg::PointCloud2 pointcloud2_msg;
-        pointcloud2_msg.header = msg.header;
-        pointcloud2_msg.height = 1;
-        pointcloud2_msg.width = msg.points.size();
-        pointcloud2_msg.is_dense = false;
-        pointcloud2_msg.is_bigendian = false;
-        
-        // Define fields
-        pointcloud2_msg.fields.resize(6); // x, y, z, exp_gain, is_obstacle, is_completely_connected, node_id
-        pointcloud2_msg.fields[0].name = "x";
-        pointcloud2_msg.fields[0].offset = 0;
-        pointcloud2_msg.fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32;
-        pointcloud2_msg.fields[0].count = 1;
-        
-        pointcloud2_msg.fields[1].name = "y";
-        pointcloud2_msg.fields[1].offset = 4;
-        pointcloud2_msg.fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32;
-        pointcloud2_msg.fields[1].count = 1;
-        
-        pointcloud2_msg.fields[2].name = "z";
-        pointcloud2_msg.fields[2].offset = 8;
-        pointcloud2_msg.fields[2].datatype = sensor_msgs::msg::PointField::FLOAT32;
-        pointcloud2_msg.fields[2].count = 1;
-        
-        pointcloud2_msg.fields[3].name = "obs_or_reach";
-        pointcloud2_msg.fields[3].offset = 12;
-        pointcloud2_msg.fields[3].datatype = sensor_msgs::msg::PointField::UINT8;
-        pointcloud2_msg.fields[3].count = 1;
-
-        pointcloud2_msg.fields[4].name = "robot_id";
-        pointcloud2_msg.fields[4].offset = 16;
-        pointcloud2_msg.fields[4].datatype = sensor_msgs::msg::PointField::UINT8;
-        pointcloud2_msg.fields[4].count = 1;
-
-        pointcloud2_msg.fields[5].name = "frontier_id";
-        pointcloud2_msg.fields[5].offset = 20;
-        pointcloud2_msg.fields[5].datatype = sensor_msgs::msg::PointField::UINT8;
-        pointcloud2_msg.fields[5].count = 1;
-
-        pointcloud2_msg.point_step = 21;  //Corrected point_step value: 3 fields x 4 bytes (for x, y, z) + 1 field x 1 byte (for obs_or_reach)
-        pointcloud2_msg.row_step = pointcloud2_msg.point_step * pointcloud2_msg.width;
-        
-        // Reserve memory for the point data
-        pointcloud2_msg.data.resize(pointcloud2_msg.row_step * pointcloud2_msg.height);
-        
-        sensor_msgs::PointCloud2Iterator<float> iter_x(pointcloud2_msg, "x");
-        sensor_msgs::PointCloud2Iterator<float> iter_y(pointcloud2_msg, "y");
-        sensor_msgs::PointCloud2Iterator<float> iter_z(pointcloud2_msg, "z");
-        sensor_msgs::PointCloud2Iterator<uint8_t> iter_is_LR(pointcloud2_msg, "obs_or_reach");
-        sensor_msgs::PointCloud2Iterator<uint8_t> iter_robot_id(pointcloud2_msg, "robot_id");
-        sensor_msgs::PointCloud2Iterator<uint8_t> iter_frontier_id(pointcloud2_msg, "frontier_id");
-
-        
-        for (size_t i = 0; i < msg.points.size(); ++i, ++iter_x, ++iter_y, ++iter_z, ++iter_is_LR, ++iter_robot_id, ++iter_frontier_id)
-        {
-            *iter_x = msg.points[i].x;
-            *iter_y = msg.points[i].y;
-            *iter_z = msg.points[i].z;
-            *iter_is_LR = static_cast<uint8_t>(msg.channels[0].values[i]);    
-            *iter_robot_id = static_cast<uint8_t>(msg.channels[1].values[i]); 
-            *iter_frontier_id = static_cast<uint8_t>(msg.channels[2].values[i]); 
-        }
-        
-        // return PointCloud2 message
-        return pointcloud2_msg;
-    };
+    std::vector<std_msgs::msg::ColorRGBA> robot_color;
+   
 
   void statusCallback(const gbeam2_interfaces::msg::Status::SharedPtr received_status){
     curr_status[received_status->robot_id] = *received_status;
@@ -193,17 +178,93 @@ private:
 
     std::string target_frame =  "robot0/odom"; //becasue lookupTransform doesn't allow "/" as first character
 
-    //initialize node_points for /graph_nodes
-    sensor_msgs::msg::PointCloud node_points;
-    visualization_msgs::msg::Marker frontier_lines;
-    frontier_lines.ns = "comm_drawer";
-    frontier_lines.id = 1;
-    frontier_lines.type = visualization_msgs::msg::Marker::LINE_LIST;
-    frontier_lines.scale.x = 0.02 * scaling;
-    sensor_msgs::msg::ChannelFloat32 ObsORReach;
-    sensor_msgs::msg::ChannelFloat32 robot_id;
-    sensor_msgs::msg::ChannelFloat32 frontier_id;
- 
+    // Triangle position marker
+    float z_height_triangle= 12;
+    visualization_msgs::msg::Marker triangle_marker;
+    triangle_marker.header.frame_id = "world";
+    triangle_marker.header.stamp = this->now();
+    triangle_marker.ns = "robot_triangle";
+    triangle_marker.id = received_status->robot_id;
+    triangle_marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
+    triangle_marker.action = visualization_msgs::msg::Marker::ADD;
+    triangle_marker.scale.x = 0.2;
+    triangle_marker.scale.y = 0.2;
+    triangle_marker.scale.z = 0.2;
+    triangle_marker.color = robot_color[received_status->robot_id];
+
+    // Extract position and orientation
+    const auto& position = received_status->current_position.pose.pose.position;
+    const auto& orientation = received_status->current_position.pose.pose.orientation;
+
+    // Convert quaternion to yaw
+    double yaw = atan2(2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
+                    1.0 - 2.0 * (orientation.y * orientation.y + orientation.z * orientation.z));
+
+    // Define triangle size
+    double base_length = 0.15;  // Base width of the triangle
+    double height = 0.25;        // Distance to the front vertex
+
+    // Compute vertices
+    geometry_msgs::msg::Point front_vertex, left_vertex, right_vertex;
+    front_vertex.x = position.x + height * cos(yaw);
+    front_vertex.y = position.y + height * sin(yaw);
+    front_vertex.z = z_height_triangle;
+
+    left_vertex.x = position.x - base_length * cos(yaw + M_PI_2);
+    left_vertex.y = position.y - base_length * sin(yaw + M_PI_2);
+    left_vertex.z = z_height_triangle;
+
+    right_vertex.x = position.x - base_length * cos(yaw - M_PI_2);
+    right_vertex.y = position.y - base_length * sin(yaw - M_PI_2);
+    right_vertex.z = z_height_triangle;
+
+    // Add the triangle vertices (CCW order)
+    triangle_marker.points.push_back(front_vertex);
+    triangle_marker.points.push_back(left_vertex);
+    triangle_marker.points.push_back(right_vertex);
+
+    // Publish triangle marker
+    robot_triangle_pub_->publish(triangle_marker);
+
+
+    // Triangle Current Cluster marker
+    visualization_msgs::msg::Marker cluster_triangle_marker;
+    cluster_triangle_marker.header.frame_id = "world";
+    cluster_triangle_marker.header.stamp = this->now();
+    cluster_triangle_marker.ns = "robot_triangle";
+    cluster_triangle_marker.id = received_status->robot_id+25;
+    cluster_triangle_marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
+    cluster_triangle_marker.action = visualization_msgs::msg::Marker::ADD;
+    cluster_triangle_marker.scale.x = 0.2;
+    cluster_triangle_marker.scale.y = 0.2;
+    cluster_triangle_marker.scale.z = 0.2;
+    cluster_triangle_marker.color = robot_color[received_status->robot_id];
+
+    // Extract position and orientation
+    const auto& position2 = received_status->current_cluster.centroid;
+    
+
+    // Compute vertices
+    front_vertex.x = position2.x + height * cos(yaw);
+    front_vertex.y = position2.y + height * sin(yaw);
+    front_vertex.z = z_height_triangle;
+
+    left_vertex.x = position2.x - base_length * cos(yaw + M_PI_2);
+    left_vertex.y = position2.y - base_length * sin(yaw + M_PI_2);
+    left_vertex.z = z_height_triangle;
+
+    right_vertex.x = position2.x - base_length * cos(yaw - M_PI_2);
+    right_vertex.y = position2.y - base_length * sin(yaw - M_PI_2);
+    right_vertex.z = z_height_triangle;
+
+    // Add the triangle vertices (CCW order)
+    cluster_triangle_marker.points.push_back(front_vertex);
+    cluster_triangle_marker.points.push_back(left_vertex);
+    cluster_triangle_marker.points.push_back(right_vertex);
+
+    // Publish triangle marker
+    robot_triangle_cluster_pub_->publish(cluster_triangle_marker);
+
  
     for (int i = 0; i < N_robot; i++) {
         for (int j = i + 1; j < N_robot; j++) { 
@@ -257,20 +318,12 @@ private:
 
     joint_vector_markers.header.frame_id = "world";
     joint_line_markers.header.frame_id = "world";
-    frontier_lines.header.frame_id = "world";
-    node_points.header.frame_id = "world";
-
-    node_points.channels.push_back(ObsORReach);
-    node_points.channels.push_back(robot_id);
-    node_points.channels.push_back(frontier_id);
 
 
-    sensor_msgs::msg::PointCloud2 node_points_2 = pointCloudTOpointCloud2(node_points);
 
-    frontier_point_pub_->publish(node_points_2);
     joint_vectors_pub_->publish(joint_vector_markers);
     joint_line_pub_->publish(joint_line_markers);
-    frontier_line_pub_->publish(frontier_lines);
+    
 }
 
 

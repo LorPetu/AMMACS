@@ -36,7 +36,6 @@ endforeach(DEP IN LISTS DEPENDANCIES)
 set(EXECUTABLES
   partial_graph_merger
   status_transmitter
-  status_receiver
 )
 
 # Loop over each executable 

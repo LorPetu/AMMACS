@@ -34,7 +34,14 @@
 
 #include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
 #include "gbeam2_interfaces/msg/graph_cluster.hpp"
+#include "gbeam2_interfaces/msg/poly_area.hpp"
+#include "gbeam2_interfaces/msg/graph.hpp"
+#include "gbeam2_interfaces/msg/graph_update.hpp"
+
+#include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
+#include "gbeam2_interfaces/msg/graph_cluster.hpp"
 #include "gbeam2_interfaces/srv/set_mapping_status.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
@@ -51,12 +58,7 @@
 #define INF 100000
 //-------------------------------------------------------------------------------------------------------------
 
-struct V_info
-{
-    int node_id;
-    double coeff;
-    int cluster_id;
-};
+
 
 
 
@@ -77,6 +79,8 @@ public:
 
         graph_pub_ =this->create_publisher<gbeam2_interfaces::msg::Graph>(
           "gbeam/reachability_graph",1);
+        external_graph_pub_ =this->create_publisher<sensor_msgs::msg::PointCloud2>(
+          "gbeam/external_graph",1);
 
         clusters_pub_ =this->create_publisher<gbeam2_interfaces::msg::GraphCluster>(
           "gbeam/clusters",1);
@@ -88,8 +92,11 @@ public:
         batch_values.data.resize(4);
         
         // SERVICE
-        status_server_ = this->create_service<gbeam2_interfaces::srv::SetMappingStatus>(
+        status_server_ = this->create_service<std_srvs::srv::SetBool>(
            "gbeam/set_mapping_status", std::bind(&GraphUpdateNode::setStatus, this, std::placeholders::_1, std::placeholders::_2));
+
+        clustering_service_ = this->create_service<std_srvs::srv::SetBool>(
+        "gbeam/start_cluster",std::bind(&GraphUpdateNode::changeClusterState,this, std::placeholders::_1, std::placeholders::_2));
 
         //Initialize parameters
         this->declare_parameter<double>("node_dist_min",0.0);
@@ -98,6 +105,7 @@ public:
         this->declare_parameter<double>("obstacle_margin",0.0);
         this->declare_parameter<double>("safe_dist",0.0);
         this->declare_parameter<double>("max_lenght_edge",0.0);
+        this->declare_parameter<int>("N_robot",0);
         
         //Exploration limits
         this->declare_parameter<double>("limit_xi",0.0);
@@ -121,6 +129,8 @@ public:
         limit_xs = this->get_parameter("limit_xs").get_parameter_value().get<double>();
         limit_yi = this->get_parameter("limit_yi").get_parameter_value().get<double>();
         limit_ys = this->get_parameter("limit_ys").get_parameter_value().get<double>();
+
+        N_robot = this->get_parameter("N_robot").get_parameter_value().get<int>();
       
         RCLCPP_INFO(this->get_logger(),"############# PARAMETERS OF GRAPH_UPDATE: ############# ");
         RCLCPP_INFO(this->get_logger(),"############# (for %s) ############# ",name_space.c_str());
@@ -133,21 +143,11 @@ public:
         RCLCPP_INFO(this->get_logger(),"7) LIMIT_XS: %f", limit_xs);
         RCLCPP_INFO(this->get_logger(),"8) LIMIT_YI: %f", limit_yi);
         RCLCPP_INFO(this->get_logger(),"9) LIMIT_YS: %f", limit_ys);
+        RCLCPP_INFO(this->get_logger(),"10) N_robot: %d", N_robot);
+
+        node_ext_index.resize(N_robot);
 
     }    
-
-    // Declaration of the setStatus function
-    bool setStatus(
-        const std::shared_ptr<gbeam2_interfaces::srv::SetMappingStatus::Request> request,
-        std::shared_ptr<gbeam2_interfaces::srv::SetMappingStatus::Response> response)
-    {
-        RCLCPP_INFO(this->get_logger(),"setting status -------> done");
-        // Assuming mapping_status is a member variable of your GraphUpdateNode class
-        mapping_status = request->request;
-        response->response = true;
-
-        return true;
-   }
 
 private:
     bool mapping_status=false;
@@ -157,9 +157,9 @@ private:
     double obstacle_margin;
     double safe_dist;
     double max_lenght_edge;
+    int N_robot;
 
     bool received_ext_nodes;
-
     
     double limit_xi, limit_xs, limit_yi, limit_ys;
 
@@ -169,12 +169,13 @@ private:
     std::string name_space;
     int name_space_id;
 
-    gbeam2_interfaces::msg::FreePolygonStamped external_nodes;
     std::vector<gbeam2_interfaces::msg::Bridge> external_bridges;
     std::vector<gbeam2_interfaces::msg::Bridge> candidates_bridges;
     int N_bridges=0;
 
     gbeam2_interfaces::msg::Graph graph;
+    gbeam2_interfaces::msg::Graph external_graph;
+    std::vector<std::unordered_map<int,int>> node_ext_index; 
     std::vector<gbeam2_interfaces::msg::Vertex> new_reach_node;
     int E_new=0; //new added edges
     int V_new=0; //new just added edges
@@ -185,19 +186,22 @@ private:
     std::vector<int> update_batch;
     bool start_batch=false;
 
+
     gbeam2_interfaces::msg::GraphCluster Graphclusters;
     std::unordered_map<int, int> node_to_cluster;
     std::unordered_map<int, double> node_to_coeff;
     gbeam2_interfaces::msg::GraphCluster louvain_Com;
     std::unordered_map<int, int> ClusterNode_to_comm;
     std::unordered_map<int, double> ClusterNode_coeff;
-    std::vector<V_info> unclustered_nodes;
+
 
     rclcpp::Publisher<gbeam2_interfaces::msg::Graph>::SharedPtr graph_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr external_graph_pub_;
     rclcpp::Publisher<gbeam2_interfaces::msg::GraphCluster>::SharedPtr clusters_pub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::FreePolygonStamped>::SharedPtr poly_sub_;
     rclcpp::Subscription<gbeam2_interfaces::msg::GraphUpdate>::SharedPtr external_poly_sub_;
-    rclcpp::Service<gbeam2_interfaces::srv::SetMappingStatus>::SharedPtr status_server_;
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr status_server_;
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr clustering_service_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr batch_values_pub_;
     std_msgs::msg::Float32MultiArray batch_values;
     
@@ -406,6 +410,7 @@ private:
             if(node_enum) graph.nodes[node.id].cluster_id =id;
             N++;
         }
+        new_cl.belong_to =name_space_id;
         return new_cl;
 
     }    
@@ -424,6 +429,7 @@ private:
             tot_gain+=graph.nodes[node_id].gain;
         }
         it.total_gain=tot_gain;
+        it.neighbours_centroids.clear();
 
         int count = it.nodes.size();
         
@@ -455,6 +461,7 @@ private:
             tot_gain+=graph.nodes[node_id].gain;
         }
         it->total_gain=tot_gain;
+        it->neighbours_centroids.clear();
 
         int count = it->nodes.size();
         
@@ -471,7 +478,7 @@ private:
 
     }
 
-    void mergeClusters(gbeam2_interfaces::msg::GraphClusterNode& blob, gbeam2_interfaces::msg::GraphClusterNode& host,std::vector<std::vector<float>>& cluster_adj_matrix){
+    void mergeClusters(gbeam2_interfaces::msg::GraphClusterNode& blob, gbeam2_interfaces::msg::GraphClusterNode& host,std::vector<std::vector<float>>& cluster_adj_matrix,std::vector<std::vector<float>>& avg_lenght_M,std::vector<std::vector<int>>& n_edges_M){
         // Add cluster blob (and all of its nodes) to cluster host 
         if(blob.is_unmergeable){
             //RCLCPP_INFO(this->get_logger(),"Cluster %d CAN NOT BE merged into %d",blob.cluster_id,host.cluster_id);
@@ -485,6 +492,12 @@ private:
             cluster_adj_matrix[host.cluster_id][host.cluster_id] += cluster_adj_matrix[blob.cluster_id][blob.cluster_id];
             cluster_adj_matrix[blob.cluster_id][blob.cluster_id] = 0.0;
 
+            //
+
+            
+
+            // HERE I SHOULD PUT THE AVERAGE COMPUTATION OF EDGE LENGTH BETWEEN CLUSTER
+
             //update matrix and weights
             for (int i = 0; i < cluster_adj_matrix.size(); i++)
             {
@@ -493,6 +506,23 @@ private:
                     if(i==blob.cluster_id){
                        cluster_adj_matrix[host.cluster_id][j] += cluster_adj_matrix[i][j];
                        cluster_adj_matrix[j][host.cluster_id] += cluster_adj_matrix[j][i];
+
+                       auto& n = n_edges_M[host.cluster_id][j];
+                       auto& m = n_edges_M[i][j];
+                       auto& avg_n = avg_lenght_M[host.cluster_id][j];
+                       auto& avg_m = avg_lenght_M[i][j];
+
+                        avg_n=(n*avg_n +m*avg_m)/(n+m);
+                        n=n+m;
+                        m=0;
+                        avg_m =0;
+
+                        //Symmetric change
+                       n_edges_M[j][host.cluster_id]=n;
+                       n_edges_M[j][i]=m;
+                       avg_lenght_M[j][host.cluster_id]=avg_n;
+                       avg_lenght_M[j][i]=avg_m;
+
 
                        cluster_adj_matrix[i][j]=0;
                        cluster_adj_matrix[j][i]=0;
@@ -507,11 +537,129 @@ private:
 
     }
 
+    gbeam2_interfaces::msg::Bridge createCandidateBridge(const gbeam2_interfaces::msg::Vertex int_vert,const gbeam2_interfaces::msg::Vertex ext_vert, float vert_ext_dist){
+        gbeam2_interfaces::msg::Bridge temp_bridge;
+            temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
+            temp_bridge.v1 = int_vert.id; temp_bridge.c1 = int_vert.cluster_id; temp_bridge.r1 = name_space_id;
+    
+            temp_bridge.v2 = ext_vert.id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = ext_vert.belong_to; 
+
+            temp_bridge.direction.x = ext_vert.x - int_vert.x;
+            temp_bridge.direction.y = ext_vert.y - int_vert.y;
+            temp_bridge.direction.z = 0;
+            float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
+            temp_bridge.direction.x /= norm;
+            temp_bridge.direction.y /= norm;
+            
+            return temp_bridge;
+    }
+
+    // Declaration of the setStatus function
+    void setStatus(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+        std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+    {
+        RCLCPP_INFO(this->get_logger(),"setting status -------> done");
+        mapping_status = true;
+        response->success = true;
+        response->message = "Starting Mapping...";
+   }
+    
+    void changeClusterState(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+        std::shared_ptr<std_srvs::srv::SetBool::Response> response){
+        
+        if(request->data){
+            cluster_state = 2;
+            response->success=true;
+        }
+    }
+    
+    void printUnorderedMap(const rclcpp::Logger& logger, const std::unordered_map<int, int>& map,  const std::string& map_name = "UnorderedMap") {
+      std::ostringstream oss;
+      oss << map_name << ": {";
+
+      for (const auto& pair : map) {
+          oss << pair.first << ": " << pair.second << ", ";
+      }
+
+      std::string map_string = oss.str();
+      // Remove trailing comma and space, if the map is not empty
+      if (!map.empty()) {
+          map_string.pop_back();
+          map_string.pop_back();
+      }
+
+      map_string += "}";
+      RCLCPP_INFO(logger, "%s", map_string.c_str());
+    }
+
     void extNodesCallback(const std::shared_ptr<gbeam2_interfaces::msg::GraphUpdate> ext_updates){
         // Each time i receive external nodes I store them 
         if(!mapping_status) mapping_status=true;
-        external_nodes = ext_updates->poly_ext;
+
+        // Devo solo usare un elenco di nodi
+
+        if(!ext_updates->new_nodes.empty()){
+            for(auto node: ext_updates->new_nodes){
+
+                auto it = node_ext_index[node.belong_to].find(node.id);
+                if(it!= node_ext_index[node.belong_to].end()){
+                    //If i have already the node in my external graph update it.
+                    external_graph.nodes[node_ext_index[node.belong_to][node.id]] = node;
+                }else{
+                    //If i have NOT the node in my external graph add it.
+                    node_ext_index[node.belong_to][node.id] = external_graph.nodes.size();
+                    external_graph.nodes.push_back(node);
+                }
+                
+            }
+        }
+        
+        //RCLCPP_INFO(this->get_logger(), "Received external nodes %d - TOT EXTERNAL NODES %d",ext_updates->new_nodes.size(), external_graph.nodes.size());
+        //printUnorderedMap(this->get_logger(),node_ext_index[ext_updates->robot_id]);
+        external_graph.robot_id = ext_updates->robot_id;
         external_bridges = ext_updates->bridges;
+
+        // DEBUG CLOUDPOINT 
+        // Prepare the PointCloud2 message
+        sensor_msgs::msg::PointCloud2 external_nodes_pointcloud;
+        external_nodes_pointcloud.header.frame_id = name_space.substr(1, name_space.length()-1) + "/odom" ;
+        //external_nodes_pointcloud.header.stamp =  tf2::TimePointZero;
+
+
+        // Reserve space for the points and the additional "side" field
+        external_nodes_pointcloud.height = 1;                  // Unordered point cloud (1D array)
+        external_nodes_pointcloud.is_dense = false;            // Allow for possible invalid points
+        int total_points = external_graph.nodes.size();
+        external_nodes_pointcloud.width = total_points;        // Number of points
+
+        // Define the PointCloud2 fields
+        sensor_msgs::PointCloud2Modifier modifier(external_nodes_pointcloud);
+        modifier.setPointCloud2Fields(3,  // Number of fields: x, y, z, and side
+            "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+            "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+            "z", 1, sensor_msgs::msg::PointField::FLOAT32); 
+
+        modifier.resize(total_points);  // Resize the point cloud to accommodate all points
+
+        // Use iterators for better handling of PointCloud2
+        sensor_msgs::PointCloud2Iterator<float> iter_x(external_nodes_pointcloud, "x");
+        sensor_msgs::PointCloud2Iterator<float> iter_y(external_nodes_pointcloud, "y");
+        sensor_msgs::PointCloud2Iterator<float> iter_z(external_nodes_pointcloud, "z");
+            
+        for(auto& vert:external_graph.nodes){
+
+            *iter_x = vert.x;
+            *iter_y = vert.y;
+            *iter_z = vert.z;
+            
+            
+            ++iter_x;
+            ++iter_y;
+            ++iter_z;
+
+        }
+
+        external_graph_pub_->publish(external_nodes_pointcloud);
         received_ext_nodes = true;
     }
 
@@ -549,22 +697,19 @@ private:
                 }
             
         }
-        gbeam2_interfaces::msg::Vertex position;
-        position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
-        //poly_ptr->polygon.vertices_reachable.push_back(position);
         
         //std::is_empty<gbeam2_interfaces::msg::FreePolygonStamped>
         if(received_ext_nodes){
-            graph.last_updater_id = external_nodes.robot_id;
+            graph.last_updater_id = external_graph.robot_id;
             is_changed = true;
-            RCLCPP_INFO(this->get_logger(), "I received some nodes from %d!", external_nodes.robot_id);
+            //RCLCPP_INFO(this->get_logger(), "I received some nodes from %d!", external_nodes.robot_id);
 
         } else {
             graph.last_updater_id = name_space_id;
         }
 
-        gbeam2_interfaces::msg::Graph fake_graph;
-        fake_graph.nodes = external_nodes.polygon.vertices_reachable;
+        //compute polygon in global coordinates
+        gbeam2_interfaces::msg::FreePolygon polyGlobal = poly_transform(poly_ptr->polygon, l2g_tf);
 
 
         // ####################################################
@@ -584,13 +729,13 @@ private:
 
             /// ####### NEW PART FOR COMMUNICATION ############
             float vert_ext_dist; 
-            int vert_ext_id;
-            if(external_nodes.polygon.vertices_reachable.size()!=0){
-                
-                auto temp_pair = vert_graph_distance_noobstacle(fake_graph, vert);
+            gbeam2_interfaces::msg::Vertex vert_ext;
+            if(external_graph.nodes.size()!=0){
+                // Return the distance and the id 
+                auto temp_pair = vert_graph_distance_noobstacle(external_graph, vert);
                 vert_ext_dist = temp_pair.first;
-                vert_ext_id = temp_pair.second;
-                //RCLCPP_INFO(this->get_logger(),"My REACHABLE vertex %d has node %d of robot%d %f distant", i, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+                vert_ext = temp_pair.second;
+                //RCLCPP_INFO(this->get_logger(),"My REACHABLE vertex %d has node %d of robot%d %f distant", i, vert_ext.id,external_graph.robot_id, vert_ext_dist);
 
             }
             else{
@@ -612,27 +757,17 @@ private:
             addNode(graph,vert); //add vertex to the graph
            
             
-            if(vert_ext_dist<=max_lenght_edge && fake_graph.nodes[vert_ext_id].cluster_id!=-1){ // Candidate bridge with external nodes
-                gbeam2_interfaces::msg::Bridge temp_bridge;
-                temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
-                temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
-                vert.gain=0;
-                auto ext_vert =fake_graph.nodes[vert_ext_id];
-                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+            if(vert_ext_dist<=max_lenght_edge*1.5){ // Candidate bridge with external nodes
+                
+                auto temp_bridge = createCandidateBridge(vert,vert_ext,vert_ext_dist);
+                if(isInsideReachable(polyGlobal,vert_ext)&& isInsideReachable(polyGlobal,vert)) temp_bridge.is_walkable=true;
 
-                temp_bridge.direction.x = ext_vert.x - vert.x;
-                temp_bridge.direction.y = ext_vert.y - vert.y;
-                temp_bridge.direction.z = 0;
-                float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
-                temp_bridge.direction.x /= norm;
-                temp_bridge.direction.y /= norm;
                 candidates_bridges.push_back(temp_bridge);
                 is_changed=true;
-              
 
-                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
-                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+                // RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                //                                             temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                //                                             temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
             }
 
            
@@ -662,9 +797,9 @@ private:
             /// ####### NEW PART FOR COMMUNICATION ############
             float vert_ext_dist; 
             if(received_ext_nodes && external_nodes.polygon.vertices_obstacles.size()!=0){
-                gbeam2_interfaces::msg::Graph fake_graph;
-                fake_graph.nodes = external_nodes.polygon.vertices_obstacles;
-                vert_ext_dist = vert_graph_distance_noobstacle(fake_graph, vert);
+                gbeam2_interfaces::msg::Graph external_graph;
+                external_graph.nodes = external_nodes.polygon.vertices_obstacles;
+                vert_ext_dist = vert_graph_distance_noobstacle(external_graph, vert);
             }
             else{
                 vert_ext_dist = INF;
@@ -707,12 +842,12 @@ private:
 
             /// ####### NEW PART FOR COMMUNICATION ############
             float vert_ext_dist; 
-            int vert_ext_id;
-            if(external_nodes.polygon.vertices_reachable.size()!=0){ // Compare its own inside nodes with external one (only reacheable)
-                auto temp_pair = vert_graph_distance_noobstacle(fake_graph, vert);
+            gbeam2_interfaces::msg::Vertex vert_ext;
+            if(external_graph.nodes.size()!=0){ // Compare its own inside nodes with external one (only reacheable)
+                auto temp_pair = vert_graph_distance_noobstacle(external_graph, vert);
                 vert_ext_dist = temp_pair.first;
-                vert_ext_id = temp_pair.second;
-                //RCLCPP_INFO(this->get_logger(),"My INSIDE vertex %d has node %d of robot%d %f distant", i, vert_ext_id,external_nodes.robot_id, vert_ext_dist);
+                vert_ext = temp_pair.second;
+                //RCLCPP_INFO(this->get_logger(),"My INSIDE vertex %d has node %d of robot%d %f distant", i, vert_ext.id,vert_ext.belong_to, vert_ext_dist);
 
             }
             else{
@@ -724,7 +859,6 @@ private:
             {
             vert.id = graph.nodes.size();
             vert.is_reachable = true;
-            vert.gain ++;
             if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
             {
                 vert.is_reachable = false;
@@ -732,28 +866,17 @@ private:
             }
             addNode(graph,vert); //add vertex to the graph
             
-            if(vert_ext_dist<=max_lenght_edge && fake_graph.nodes[vert_ext_id].cluster_id!=-1){ // Candidate bridge with external nodes
-                gbeam2_interfaces::msg::Bridge temp_bridge;
-                temp_bridge.belong_to = name_space_id; temp_bridge.is_walkable =false; temp_bridge.length = vert_ext_dist;
-                temp_bridge.v1 = vert.id; temp_bridge.c1 = vert.cluster_id; temp_bridge.r1 = name_space_id;
-                vert.gain=0;
-            
-                auto ext_vert =fake_graph.nodes[vert_ext_id];
-                temp_bridge.v2 = vert_ext_id; temp_bridge.c2 = ext_vert.cluster_id; temp_bridge.r2 = external_nodes.robot_id; 
+            if(vert_ext_dist<=max_lenght_edge){ // Candidate bridge with external nodes && vert_ext.cluster_id!=-1
+                auto temp_bridge = createCandidateBridge(vert,vert_ext,vert_ext_dist);
+                if(isInsideReachable(polyGlobal,vert_ext)&& isInsideReachable(polyGlobal,vert)) temp_bridge.is_walkable=true;
 
-                temp_bridge.direction.x = ext_vert.x - vert.x;
-                temp_bridge.direction.y = ext_vert.y - vert.y;
-                temp_bridge.direction.z = 0;
-                float norm = sqrt(pow(temp_bridge.direction.x, 2) + pow(temp_bridge.direction.y, 2));
-                temp_bridge.direction.x /= norm;
-                temp_bridge.direction.y /= norm;
                 candidates_bridges.push_back(temp_bridge);
                 is_changed=true;
               
 
-                RCLCPP_INFO(this->get_logger(),"Candidate BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
-                                                            temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
+                // RCLCPP_INFO(this->get_logger(),"Candidate INTERNAL BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
+                //                                             temp_bridge.v1, temp_bridge.c1, temp_bridge.r1,
+                //                                             temp_bridge.v2, temp_bridge.c2, temp_bridge.r2, temp_bridge.length);
             }
             if(vert.is_reachable) new_reach_node.push_back(vert);
             
@@ -773,29 +896,31 @@ private:
         int N = new_adj_matrix.size();
         double m = 0.0;
         std::vector<std::vector<float>> weight_adj_matrix(N, std::vector<float>(N, 0.0f));  // Initialize with zeros
+        std::vector<std::vector<float>> lenght_adj_matrix(N, std::vector<float>(N, -1.0f));  // Initialize with zeros
 
         for (int i = 0; i < N; ++i) {
             for (int j = i+1; j < N; ++j) {
                 int e_ij = new_adj_matrix[i][j];
                 if(e_ij!=-1){
                     weight_adj_matrix[i][j] = 1/graph.edges[e_ij].length;
+                    weight_adj_matrix[j][i] = 1/graph.edges[e_ij].length;
+                    lenght_adj_matrix[i][j] = graph.edges[e_ij].length;
+                    lenght_adj_matrix[j][i] = graph.edges[e_ij].length;
                 } 
                 else{
                     weight_adj_matrix[i][j] = 0.0;
+                    lenght_adj_matrix[i][j] = -1.0;
                 }
                 m+= weight_adj_matrix[i][j];
             }
            
         }
-        
-        //auto cl_adj_matrix = GraphAdj2matrix(clusters.adj_matr);
 
         // ####################################################
         // ####### ---------- ADD GRAPH EDGES --------- #######
         // ####################################################
         
-        //compute polygon in global coordinates
-        gbeam2_interfaces::msg::FreePolygon polyGlobal = poly_transform(poly_ptr->polygon, l2g_tf);
+
 
         //create vectors with indices of vertices inside polytopes
         std::vector<int> inReachableId;
@@ -834,6 +959,10 @@ private:
                     //update adjacency matrix
                     new_adj_matrix[inReachableId[i]][inReachableId[j]] = edge.id;
                     new_adj_matrix[inReachableId[j]][inReachableId[i]] = edge.id;
+                    weight_adj_matrix[inReachableId[i]][inReachableId[j]] = 1/edge.length;
+                    weight_adj_matrix[inReachableId[j]][inReachableId[i]] = 1/edge.length;
+                    lenght_adj_matrix[inReachableId[i]][inReachableId[j]] = edge.length;
+                    lenght_adj_matrix[inReachableId[j]][inReachableId[i]] = edge.length;
                     graph.nodes[inReachableId[i]].neighbors.push_back(node_j.id);
                     graph.nodes[inReachableId[j]].neighbors.push_back(node_i.id);
 
@@ -880,49 +1009,50 @@ private:
             }
         }*/
         
-
+        //printMatrix(this->get_logger(),lenght_adj_matrix);
         graph.adj_matrix=matrix2GraphAdj(new_adj_matrix);
+        graph.length_matrix = matrix2GraphAdj(lenght_adj_matrix);
 
         // ####################################################
         // ####### --- UPDATE CONNECTIONS AND GAINS --- #######
         // #################################################### 
 
-        if(is_changed)
-        {
-            for(int n=0; n<graph.nodes.size(); n++)
-            {
-            if(graph.nodes[n].is_obstacle && !graph.nodes[n].is_completely_connected)
-            {
-                bool connected_left = false, connected_right = false;
-                for(int e : new_adj_matrix[n]){
-                    if(e!= -1 && graph.edges[e].is_boundary)
-                {
-                    // compute angular coefficient of the line containing normal: y=mx
-                    float m = graph.nodes[n].obstacle_normal.y/graph.nodes[n].obstacle_normal.x;
-                    // compute value of the inequality mx-y>0, evaluated for edge direction
-                    float value = m * graph.edges[e].direction.x - graph.edges[e].direction.y;
-                    if(graph.edges[e].v2 == n)
-                    value = -value;
-                    if(value>0)
-                    connected_right = true;
-                    else
-                    connected_left = true;
-                }
+        // if(is_changed)
+        // {
+        //     for(int n=0; n<graph.nodes.size(); n++)
+        //     {
+        //     if(graph.nodes[n].is_obstacle && !graph.nodes[n].is_completely_connected)
+        //     {
+        //         bool connected_left = false, connected_right = false;
+        //         for(int e : new_adj_matrix[n]){
+        //             if(e!= -1 && graph.edges[e].is_boundary)
+        //         {
+        //             // compute angular coefficient of the line containing normal: y=mx
+        //             float m = graph.nodes[n].obstacle_normal.y/graph.nodes[n].obstacle_normal.x;
+        //             // compute value of the inequality mx-y>0, evaluated for edge direction
+        //             float value = m * graph.edges[e].direction.x - graph.edges[e].direction.y;
+        //             if(graph.edges[e].v2 == n)
+        //             value = -value;
+        //             if(value>0)
+        //             connected_right = true;
+        //             else
+        //             connected_left = true;
+        //         }
 
-                }
+        //         }
 
 
-                if (connected_left && connected_right)
-                graph.nodes[n].is_completely_connected = true;
-                is_changed = true;
-                graph.nodes[n].gain = 0;
-            }
-            }
-        }
+        //         if (connected_left && connected_right)
+        //         graph.nodes[n].is_completely_connected = true;
+        //         is_changed = true;
+        //         graph.nodes[n].gain = 0;
+        //     }
+        //     }
+        // }
 
         // update exploration gain
-        //gbeam2_interfaces::msg::Vertex position;
-        //position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
+        /*gbeam2_interfaces::msg::Vertex position;
+        position = vert_transform(position, l2g_tf);  // create temporary vertex at robot position
         for (int i=0; i<graph.nodes.size(); i++)
         {
             if (dist(position, graph.nodes[i]) < node_dist_open)
@@ -931,7 +1061,7 @@ private:
             graph.nodes[i].is_visited = true;
             is_changed = true;
             }
-        }
+        }*/
 
         // ####################################################
         // ############### --- CLUSTERING --- #################
@@ -948,7 +1078,10 @@ private:
         //V = graph.nodes.size();
         //E = graph.edges.size();
 
-        auto cluster_adj_matrix = GraphAdj2matrix(Graphclusters.adj_matr);
+        auto cluster_adj_matrix = GraphAdj2matrix(Graphclusters.adj_matrix);
+        std::vector<std::vector<int>> n_edges_matrix(cluster_adj_matrix.size(), std::vector<int>(cluster_adj_matrix.size(), 0));  // Initialize with zeros
+        std::vector<std::vector<float>> avg_lenght_matrix(cluster_adj_matrix.size(), std::vector<float>(cluster_adj_matrix.size(), 0.0f));  // Initialize with zeros
+        
 
         
         // Parameters
@@ -1001,13 +1134,20 @@ private:
             if(tot_density_curr!=0.0 && std::isnan(gamma_1)){
                 gamma_1 = tot_density_curr; 
                 // If i have already enough edge density, i have already a revelant batch
-                if(avg_degree>min_avg_degree*0.75 && V_1 > N_vert_min && gamma_1>0.5) cluster_state=2;
+                if(avg_degree>min_avg_degree*0.5 && V_1 > N_vert_min && gamma_1>gamma_min*0.5) cluster_state=2;
             } else{
                 if(avg_degree>min_avg_degree && V_1 > N_vert_min && gamma_1!=0 && abs(tot_density_curr - gamma_1)/gamma_1>gamma_min) cluster_state=2;
+               
             } 
+
+           
+
+            
 
             int N_clusters = cluster_adj_matrix.size();
             cluster_adj_matrix.assign(N_clusters, std::vector<float>(N_clusters, 0.0f)); 
+            avg_lenght_matrix.assign(N_clusters, std::vector<float>(N_clusters, 0.0f)); 
+            n_edges_matrix.assign(N_clusters,std::vector<int>(N_clusters, 0));
 
             for (auto& cl_i : Graphclusters.clusters) {
                 for (auto& node_id : cl_i.nodes) {
@@ -1016,7 +1156,13 @@ private:
                         // Determine the cluster ID of the neighbor node
                         int neigh_cluster_id = graph.nodes[neigh_id].cluster_id;  
                         if (neigh_cluster_id != -1) {
-                           cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                            cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                            auto& n = n_edges_matrix[cl_i.cluster_id][neigh_cluster_id];
+                            auto& avg = avg_lenght_matrix[cl_i.cluster_id][neigh_cluster_id];
+
+                            avg = (n!=0) ? avg + (graph.edges[new_adj_matrix[node_id][neigh_id]].length - avg)/n : graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                            n++;
+                            // HERE I SHOULD PUT THE AVERAGE COMPUTATION OF EDGE LENGTH BETWEEN CLUSTER
                         }
                         
                     }
@@ -1082,7 +1228,7 @@ private:
             // } 
 
             // FIRST PHASE OF LOUVAIN ALGORITHM: COMMUNITY DETECTION
-            while (mod_gain_increase && max_iterations < 4) {
+            while (mod_gain_increase && max_iterations < 10) {
                 mod_gain_increase = false; // Reset at the beginning of each iteration
                 //RCLCPP_INFO(this->get_logger(), "Starting iteration %d of the Louvain algorithm.", max_iterations + 1);
 
@@ -1100,12 +1246,13 @@ private:
                             int found_cl_id = node_to_cluster[neigh_id];
                             double temp_gain = computeLocalModularityGain(candidate_node, louvain_Com.clusters[found_cl_id], node_to_cluster, weight_adj_matrix, m);
 
-                            //RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
 
                             if (temp_gain > 0.0 && temp_gain > node_to_coeff[candidate_id]) {
                                 node_to_coeff[candidate_id] = temp_gain;
                                 mod_gain_increase = true; 
                                 best_cl_id = found_cl_id;
+                                //RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d Local modularity gain = %.6f", candidate_id,node_to_cluster[candidate_id], neigh_id,node_to_cluster[neigh_id], temp_gain);
+
                             }
                         }
                     }
@@ -1124,8 +1271,8 @@ private:
                             //RCLCPP_INFO(this->get_logger(), "Node %d added to cluster %d.", candidate_id, best_cl_id);
                         }
 
-                        // Erase it from the old one 
-                        if (old_cluster_id >= 0 ) { //&& old_cluster_id != best_cl_id
+                        // Erase it from the old one if best and the old doesn't correspond 
+                        if (old_cluster_id >= 0 && old_cluster_id != best_cl_id ) { //
                             auto& old_cluster_nodes = louvain_Com.clusters[old_cluster_id].nodes;
                             old_cluster_nodes.erase(std::remove(old_cluster_nodes.begin(), old_cluster_nodes.end(), candidate_id), old_cluster_nodes.end());
                         }
@@ -1138,21 +1285,21 @@ private:
                 
             }
 
-            if (max_iterations >= 50) {
+            if (max_iterations >= 10) {
                 RCLCPP_WARN(this->get_logger(), "Maximum iterations reached without convergence.");
             } else {
-                RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
+                //RCLCPP_INFO(this->get_logger(), "Louvain algorithm converged after %d iterations.", max_iterations);
             }
 
-            for(auto& comm:louvain_Com.clusters){
-                for (auto& node_id:comm.nodes)
-                {
-                    //RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
-                    //RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
-                }
+            // for(auto& comm:louvain_Com.clusters){
+            //     for (auto& node_id:comm.nodes)
+            //     {
+            //         RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
+            //         RCLCPP_INFO(this->get_logger(), "MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
+            //     }
                 
                
-            }
+            // }
 
             // #####################################################
             // GLOBAL CLUSTERING including already existing clusters
@@ -1182,19 +1329,15 @@ private:
             std::vector<std::vector<float>> M(Graphclusters.clusters.size(), std::vector<float>(Graphclusters.clusters.size(), 0.0f));
 
             cluster_adj_matrix= M;
+            avg_lenght_matrix.assign(M.size(), std::vector<float>(M.size(), 0.0f)); 
+            n_edges_matrix.assign(M.size(),std::vector<int>(M.size(), 0));
             
-            for(auto& comm:louvain_Com.clusters){
-                for (auto& node_id:comm.nodes)
-                {
-                    //RCLCPP_INFO(this->get_logger(), "LOUVAIN: Node %d is in cluster %d", node_id, comm.cluster_id);
-                    //RCLCPP_INFO(this->get_logger(), "NEW MAPPING: Node %d is in cluster %d", node_id, node_to_cluster[node_id]);
-                }
                 
                
-            }
+            // }
 
             // Inizialization: Readapt cluster mapping to describe global commmunities 
-            // unclustered_nodes.clear();
+
 
             // Inizialization: Populate the GraphCluster weight matrix 
             // We want to identify all the edges INSIDE the cluster to make them self loop on a global level 
@@ -1221,6 +1364,17 @@ private:
 
                         // Increment the cluster adjacency matrix entry
                         cluster_adj_matrix[cl_i.cluster_id][neigh_cluster_id] += 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+
+                        // HERE I SHOULD PUT THE AVERAGE COMPUTATION OF EDGE LENGTH BETWEEN CLUSTER
+
+                        auto& n = n_edges_matrix[cl_i.cluster_id][neigh_cluster_id];
+                        auto& avg = avg_lenght_matrix[cl_i.cluster_id][neigh_cluster_id];
+
+                        avg = (n!=0) ? avg + (graph.edges[new_adj_matrix[node_id][neigh_id]].length - avg)/n : graph.edges[new_adj_matrix[node_id][neigh_id]].length;
+                        n++;
+
+                        
+
                         //RCLCPP_INFO(this->get_logger(), "Node %d in c: %d -> Neighbor %d in c: %d weight = %.6f", node_id,cl_i.cluster_id, neigh_id,neigh_cluster_id, 1/graph.edges[new_adj_matrix[node_id][neigh_id]].length);
 
                         
@@ -1278,7 +1432,7 @@ private:
                         //RCLCPP_INFO(this->get_logger(), "Node %d has MAX modularity gain = %.6f with cluster %d", candidate_id, ClusterNode_coeff[candidate_id], best_cl_id);
                         ClusterNode_to_comm[candidate_id] = best_cl_id;
                         // Move all the nodes of cluster to the best cluster
-                        if(Graphclusters.clusters[i].nodes.size()<N_vert_min+1) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix); 
+                        if(Graphclusters.clusters[i].nodes.size()<N_vert_min+1) mergeClusters(Graphclusters.clusters[i],Graphclusters.clusters[best_cl_id],cluster_adj_matrix,avg_lenght_matrix,n_edges_matrix); 
                     }
                     //RCLCPP_INFO(this->get_logger(), "END Processing cluster node %d.", candidate_id);
                 }
@@ -1289,6 +1443,8 @@ private:
             }            
 
             //RCLCPP_INFO(this->get_logger(), "Case: %d || Compute clusters and reset",cluster_state);
+
+            is_changed = true;
 
             tot_density_curr = 0.0;
             avg_degree=0.0;
@@ -1302,7 +1458,7 @@ private:
             update_batch.clear();
             cluster_state=0;
             louvain_Com.clusters.clear();
-            unclustered_nodes.clear();
+
             node_to_cluster.clear();
             node_to_coeff.clear();
             ClusterNode_coeff.clear();
@@ -1337,9 +1493,13 @@ private:
                 }
             }
 
+            //printMatrix(this->get_logger(),cluster_adj_matrix,"cluster_adj_matrix");
+
             // Resize the cluster adjacency matrix
             int new_size = new_id; // Total number of clusters after cleanup
             std::vector<std::vector<float>> updated_adj_matrix(new_size, std::vector<float>(new_size, 0.0));
+            std::vector<std::vector<float>> simple_adj_matrix(new_size, std::vector<float>(new_size, -1.0));
+            std::vector<std::vector<float>> updated_avg_lenght_matrix(new_size, std::vector<float>(new_size, 0.0));
 
             // Rebuild the adjacency matrix using the updated cluster IDs
             for (int i = 0; i < cluster_adj_matrix.size(); ++i) {
@@ -1348,10 +1508,44 @@ private:
                         int new_i = old_to_new_id[i];
                         int new_j = old_to_new_id[j];
                         updated_adj_matrix[new_i][new_j] = cluster_adj_matrix[i][j];
-                        updated_adj_matrix[new_j][new_i] = cluster_adj_matrix[i][j];
+                        updated_adj_matrix[new_j][new_i] = updated_adj_matrix[new_i][new_j];
+                        updated_avg_lenght_matrix[new_i][new_j] = avg_lenght_matrix[i][j]; 
+                        updated_avg_lenght_matrix[new_j][new_i] = updated_avg_lenght_matrix[new_i][new_j];
+                        if(i!=j){
+                            Graphclusters.clusters[new_i].neighbours_centroids.push_back(new_j);
+                            Graphclusters.clusters[new_j].neighbours_centroids.push_back(new_i);
+                        }
+                        
                     }
                 }
             }
+
+            // Safety check recomputation adjacency matrix to have a ground truth
+
+            for (int i = 0; i < Graphclusters.clusters.size(); ++i) {
+                for (int j = i; j < Graphclusters.clusters.size(); ++j) {
+                    bool connection_found = false;
+                    auto& cl_i = Graphclusters.clusters[i];
+                    auto& cl_j = Graphclusters.clusters[j];
+                    if(cl_i.cluster_id==cl_j.cluster_id) continue;
+                    for(auto node_i : cl_i.nodes){
+                        if (connection_found) break;
+                        for(auto node_j : cl_j.nodes){
+                            if (new_adj_matrix[node_i][node_j] != -1) {
+                                simple_adj_matrix[i][j] = 1;
+                                simple_adj_matrix[j][i] = 1;
+                                connection_found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+
+
+            // printMatrix(this->get_logger(),updated_adj_matrix,"Updated Matrix");
+            // printMatrix(this->get_logger(),simple_adj_matrix,"Simple Matrix");
 
             // ####################################################
             // ############## BRIDGES VALIDATION ##################
@@ -1359,7 +1553,7 @@ private:
 
             if(received_ext_nodes){
                 //Take all external bridges and check if there's any already existing 
-                RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_nodes.robot_id);
+               //RCLCPP_INFO(this->get_logger(),"I received %d bridges from %d",external_bridges.size(),external_graph.robot_id);
                 for(auto& ext_bridge : external_bridges){
                     if(ext_bridge.belong_to!=name_space_id){
                         // Check if adding this bridge is needed
@@ -1378,37 +1572,57 @@ private:
                 }
             }
 
+            int b=0;
+            int b_norm=0;
+
+            //RCLCPP_INFO(this->get_logger(),"Size of candidate bridge %d",candidates_bridges.size());
+
             for (auto it = candidates_bridges.begin();it !=candidates_bridges.end();){
-                if(graph.nodes[it->v1].cluster_id!=-1){
-                    it->c1 = graph.nodes[it->v1].cluster_id;
-                    // Check if walkable, if the two end are inside reachable polygon
-                    // Could be enough to check only external end?
-                    if(isInsideObstacles(poly_ptr->polygon,fake_graph.nodes[it->v2])&&
-                                isInsideObstacles(poly_ptr->polygon,graph.nodes[it->v1])){
-                                it->is_walkable = true; 
-                                it->id = N_bridges; N_bridges++;
-                                it->belong_to = name_space_id;                               
-                                Graphclusters.bridges.push_back(*it);
-                                RCLCPP_INFO(this->get_logger(),"ADD BRIDGE from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %f ", 
-                                                            it->v1, it->c1, it->r1,
-                                                            it->v2, it->c2, it->r2, it->length);
-                                it = candidates_bridges.erase(it);
-                                } else{
-                                    it++;
-                                }
-                                                
+                //RCLCPP_INFO(this->get_logger(),"access bridge index: %d",b);
+                auto& end1 = (it->r1!=name_space_id) ? external_graph.nodes[node_ext_index[it->r1][it->v1]] : graph.nodes[it->v1];
+                auto& end2 = (it->r2!=name_space_id) ? external_graph.nodes[node_ext_index[it->r2][it->v2]] : graph.nodes[it->v2];
+                
+                if(end1.cluster_id!=-1 && end2.cluster_id!=-1){
+                    // Check if the two end change their clustering
+                    it->c1 = end1.cluster_id;
+                    it->c2 = end2.cluster_id;
+
+                    if(it->is_walkable){
+                        it->id = N_bridges; N_bridges++;
+                        it->belong_to = name_space_id;                               
+                        Graphclusters.bridges.push_back(*it);
+                        it = candidates_bridges.erase(it);
+                        b++;
+                    } else if(isInsideReachable(polyGlobal,end1) && isInsideReachable(polyGlobal,end2)){
+                                    it->id = N_bridges; N_bridges++;
+                                    it->belong_to = name_space_id;                               
+                                    Graphclusters.bridges.push_back(*it);
+                                    it = candidates_bridges.erase(it);
+                                    b++;
+                    } else {
+                        it++;
+                        b_norm++;
+                        b++;
+                    }
                 } else{
                     it++;
+                    b_norm++;
+                    b++;
                 }
                 
             }
             
-            Graphclusters.adj_matr=matrix2GraphAdj(updated_adj_matrix);
-            graph.cluster_graph = Graphclusters;
+            Graphclusters.adj_matrix=matrix2GraphAdj(updated_adj_matrix);
+            Graphclusters.length_matrix=matrix2GraphAdj(updated_avg_lenght_matrix);
+
+            gbeam2_interfaces::msg::GraphCluster GraphClusters_copy = Graphclusters;
+            GraphClusters_copy.adj_matrix =matrix2GraphAdj(simple_adj_matrix);
+            //printMatrix(this->get_logger(),avg_lenght_matrix);
+            graph.cluster_graph = GraphClusters_copy;
 
             ////printMatrix(this->get_logger(),updated_adj_matrix); //
             graph_pub_->publish(graph);
-            clusters_pub_->publish(Graphclusters);
+            //clusters_pub_->publish(Graphclusters);
         }    
         if(is_changed && received_ext_nodes)   received_ext_nodes = false;
     

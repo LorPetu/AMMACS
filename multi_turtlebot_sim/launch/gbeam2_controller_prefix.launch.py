@@ -53,6 +53,8 @@ def generate_launch_description():
     ld = LaunchDescription(
         [
         poly_gen,
+        #graph_update,
+        #graph_expl,
          
         RegisterEventHandler(OnProcessStart(
              target_action=poly_gen, on_start=[graph_update])), 

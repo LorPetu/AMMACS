@@ -15,3 +15,7 @@ ros_debug(){
     colcon build --packages-select "$1" --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
 }
 
+alias expl0='ros2 topic echo --use-sim-time --filter "m.name==\"robot0.graph_expl\"" /rosout | grep msg' #--no-lost-messages
+alias expl1='ros2 topic echo --use-sim-time --filter "m.name==\"robot1.graph_expl\"" /rosout | grep msg' #--no-lost-messages
+alias coop0='ros2 topic echo --use-sim-time --filter "m.name==\"robot0.coop_manager\"" /rosout | grep msg' #--no-lost-messages
+alias coop1='ros2 topic echo --use-sim-time --filter "m.name==\"robot1.coop_manager\"" /rosout | grep msg' #--no-lost-messages

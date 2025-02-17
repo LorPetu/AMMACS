@@ -26,16 +26,22 @@ class StatusTXNode : public rclcpp::Node
 public:
   StatusTXNode() : Node("status_TX"){
 
-  //SUBSCRIBED TOPICS
-  odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            name_space+ "odom", 1, std::bind(&StatusTXNode::odomCallback, this, std::placeholders::_1));
-
-  ref_pos_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-            name_space+"gbeam/gbeam_pos_ref", 1, std::bind(&StatusTXNode::refPosCallback, this, std::placeholders::_1));
-
   // Get namespace
   name_space = this->get_namespace();
   name_space_id = name_space.back()- '0';
+
+  //SUBSCRIBED TOPICS
+  odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "odom", 1, std::bind(&StatusTXNode::odomCallback, this, std::placeholders::_1));
+
+  ref_pos_subscriber_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+            "gbeam/gbeam_pos_ref", 1, std::bind(&StatusTXNode::refPosCallback, this, std::placeholders::_1));
+
+  
+  current_cluster_sub = this->create_subscription<gbeam2_interfaces::msg::GraphClusterNode>(
+      "coop/current_cluster",1 ,std::bind(&StatusTXNode::currentClusterCallback, this, std::placeholders::_1));
+
+  
 
   std::string filter_string = "robot_id!=%0";          
   rclcpp::SubscriptionOptions options;
@@ -73,6 +79,7 @@ public:
      curr_status[i].joint_vector.resize(N_robot);
      curr_status[i].normal_joint_vector.resize(N_robot);
   }
+  curr_status[name_space_id].connection_status[name_space_id] = 1;
 
  
 
@@ -90,6 +97,7 @@ private:
   rclcpp::Subscription<gbeam2_interfaces::msg::Status>::SharedPtr status_sub_; 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr ref_pos_subscriber_;
+  rclcpp::Subscription<gbeam2_interfaces::msg::GraphClusterNode>::SharedPtr current_cluster_sub;
 
   rclcpp::TimerBase::SharedPtr timer_;
 
@@ -114,6 +122,15 @@ private:
 
   void statusCallback(const gbeam2_interfaces::msg::Status::SharedPtr received_status){
     curr_status[received_status->robot_id]=*received_status;
+  }
+
+  void currentClusterCallback(const gbeam2_interfaces::msg::GraphClusterNode::SharedPtr received_cluster){
+    if(received_cluster->is_target){
+      curr_status[name_space_id].target_cluster=*received_cluster;
+    }else{
+      curr_status[name_space_id].current_cluster=*received_cluster;
+    }
+    
   }
 
 

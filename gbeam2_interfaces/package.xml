@@ -18,8 +18,10 @@
   <depend>sensor_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
+  <depend>action_msgs</depend>
 
   
   <export>

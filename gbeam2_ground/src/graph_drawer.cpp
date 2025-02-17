@@ -52,7 +52,7 @@ public:
             std::bind(&GraphDrawer::graphCallback2, this, std::placeholders::_1));
 
         cluster_graph_sub = this->create_subscription<gbeam2_interfaces::msg::GraphCluster>(
-            "gbeam/clusters", 1,
+            "coop/Globalclusters", 1,
             std::bind(&GraphDrawer::ClusterCallback, this, std::placeholders::_1));
 
         this->declare_parameter<float>("scaling", 0.0);
@@ -84,6 +84,45 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr cluster_nodes_labels_pub_;  
 
     float scaling;
+    
+    float packRGB(float r, float g, float b) {
+        uint32_t rgb = (static_cast<uint8_t>(r * 255) << 16) |
+                    (static_cast<uint8_t>(g * 255) << 8)  |
+                    (static_cast<uint8_t>(b * 255));
+        float rgb_float;
+        std::memcpy(&rgb_float, &rgb, sizeof(float));  // Convert int to float without precision loss
+        return rgb_float;
+    }
+
+    float getClusterColorRGB(int cluster_id, int robot_id) {
+        if (cluster_id == -2) return packRGB(0.5, 0.5, 0.5);  // Obstacle color
+        if (cluster_id == -1) return packRGB(0.5, 0.5, 0.5);  // Not clustered color
+
+        std::srand(cluster_id + robot_id * 1000);  
+        float r = static_cast<float>(std::rand() % 256) / 255.0;
+        float g = static_cast<float>(std::rand() % 256) / 255.0;
+        float b = static_cast<float>(std::rand() % 256) / 255.0;
+
+        return packRGB(r, g, b);
+    }
+
+
+    std_msgs::msg::ColorRGBA getClusterColor(int cluster_id, int robot_id) {
+        std_msgs::msg::ColorRGBA color;
+        if (cluster_id == -2) {  // Special case for obstacles
+            color.r = 0.5, color.g = 0.5, color.b = 0.5, color.a = 1;
+            return color;
+        }
+        
+        std::srand(cluster_id + robot_id * 1000); // Ensure different robots have distinct colors
+        color.r = static_cast<float>(std::rand() % 256) / 255.0;
+        color.g = static_cast<float>(std::rand() % 256) / 255.0;
+        color.b = static_cast<float>(std::rand() % 256) / 255.0;
+        color.a = 1.0;
+
+        return color;
+    }
+
 
     void graphCallback2(const gbeam2_interfaces::msg::Graph::SharedPtr graph_ptr){
 
@@ -99,6 +138,8 @@ private:
         walkable_color.r = 1, walkable_color.g = 0.1, walkable_color.b = 0.8, walkable_color.a = 0.15;
         std_msgs::msg::ColorRGBA normals_color;
         normals_color.r = 0.6, normals_color.g = 0.3, normals_color.b = 0.6, normals_color.a = 1;
+
+
 
         float normal_length = 0.2 * scaling;
 
@@ -129,7 +170,7 @@ private:
 
         // Define the PointCloud2 fields
         sensor_msgs::PointCloud2Modifier modifier(node_points_cloud);
-        modifier.setPointCloud2Fields(8,  // Number of fields: x, y, z, and side
+        modifier.setPointCloud2Fields(9,  // Number of fields: x, y, z, and side
             "x", 1, sensor_msgs::msg::PointField::FLOAT32,
             "y", 1, sensor_msgs::msg::PointField::FLOAT32,
             "z", 1, sensor_msgs::msg::PointField::FLOAT32,
@@ -137,7 +178,8 @@ private:
             "is_obstacle", 1, sensor_msgs::msg::PointField::UINT8,
             "is_compl_connected", 1,  sensor_msgs::msg::PointField::UINT8,
             "node_id", 1, sensor_msgs::msg::PointField::UINT32,
-            "cluster_id", 1, sensor_msgs::msg::PointField::INT32); 
+            "cluster_id", 1, sensor_msgs::msg::PointField::INT32,
+            "rgb", 1, sensor_msgs::msg::PointField::FLOAT32); 
 
         modifier.resize(N);  // Resize the point cloud to accommodate all points
 
@@ -150,6 +192,7 @@ private:
         sensor_msgs::PointCloud2Iterator<uint8_t> iter_is_connected(node_points_cloud, "is_compl_connected");
         sensor_msgs::PointCloud2Iterator<uint32_t> iter_node_id(node_points_cloud, "node_id");
         sensor_msgs::PointCloud2Iterator<int32_t> iter_cluster_id(node_points_cloud, "cluster_id");
+        sensor_msgs::PointCloud2Iterator<float> iter_rgb(node_points_cloud, "rgb");
 
         for (int n = 0; n < N; n++){
             auto node = graph_ptr->nodes[n];
@@ -161,10 +204,16 @@ private:
             *iter_is_obstacle = node.is_obstacle;
             *iter_is_connected = node.is_completely_connected;
             *iter_cluster_id = node.is_obstacle ? -2: node.cluster_id; 
+            *iter_rgb = getClusterColorRGB(node.cluster_id, name_space_id);  // Assign color
             
             ++iter_x; ++iter_y; ++iter_z;
             ++iter_cluster_id; ++iter_node_id; ++iter_gain;
-            ++iter_is_obstacle; ++iter_is_connected;
+            ++iter_is_obstacle; ++iter_is_connected; ++iter_rgb;
+
+           
+
+            // Assign cluster color
+            std_msgs::msg::ColorRGBA cluster_color = getClusterColor(node.cluster_id, name_space_id);
 
             // Create a text marker for each node
             visualization_msgs::msg::Marker text_marker;
@@ -296,22 +345,31 @@ private:
         std_msgs::msg::ColorRGBA walkable_color;
         walkable_color.r = 1, walkable_color.g = 0.1, walkable_color.b = 0.8, walkable_color.a = 0.15;
 
-        std_msgs::msg::ColorRGBA robot_color;
+        std::vector<std_msgs::msg::ColorRGBA> robot_color;
+        std_msgs::msg::ColorRGBA white;
+        robot_color.resize(N_robot);
+        for (size_t i = 0; i <N_robot; i++)
+        {
+            robot_color[i].r = 0.0; robot_color[i].g = 0.0; robot_color[i].b = 0.0; robot_color[i].a = 1.0;
 
-        // Assign a rainbow color to each marker
-        float hue = 360.0f * (static_cast<float>(name_space_id) / static_cast<float>(N_robot)); // Normalize hue [0, 360]
-        float r, g, b;
-        HSVtoRGB(hue, 1.0f, 1.0f, r, g, b); // Convert HSV to RGB (1.0f for full saturation and value)
-        robot_color.r = r; robot_color.g = g; robot_color.b = b; robot_color.a = 1.0;
+            // Assign a rainbow color to each marker
+            float hue = 360.0f * (static_cast<float>(i) / static_cast<float>(N_robot)); // Normalize hue [0, 360]
+            float r, g, b;
+            HSVtoRGB(hue, 1.0f, 1.0f, r, g, b); // Convert HSV to RGB (1.0f for full saturation and value)
+            robot_color[i].r = r; robot_color[i].g = g; robot_color[i].b = b; robot_color[i].a = 1.0;
+        }
+        
+        
 
         // Draw each centroid of the cluster
+        int i=0;
         for (auto& cluster : cluster_graph_ptr->clusters) {
             // CYLINDER marker for the cluster centroid
             visualization_msgs::msg::Marker marker;
 
             marker.header.frame_id = target_frame;
             marker.ns = "cluster_centroid";
-            marker.id = cluster.cluster_id;
+            marker.id = i;
             marker.type = visualization_msgs::msg::Marker::CYLINDER;
 
             marker.action = visualization_msgs::msg::Marker::ADD;
@@ -323,7 +381,7 @@ private:
             marker.scale.y = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
             marker.scale.z = (cluster.total_gain * gain_scale< min_cluster_size) ? min_cluster_size : cluster.total_gain * gain_scale;
 
-            marker.color = robot_color;
+            marker.color = getClusterColor(cluster.cluster_id,cluster.belong_to);//(cluster.unexplored_nodes.empty()) ? white : robot_color[cluster.belong_to];
 
             
 
@@ -332,7 +390,7 @@ private:
 
             text_marker.header.frame_id = target_frame;
             text_marker.ns = "cluster_id";
-            text_marker.id = cluster.cluster_id + 1000; // Ensure unique IDs for text markers
+            text_marker.id = i + 1000; // Ensure unique IDs for text markers
             text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
 
             text_marker.action = visualization_msgs::msg::Marker::ADD;
@@ -341,24 +399,25 @@ private:
             text_marker.pose.position.y = cluster.centroid.y;
             text_marker.pose.position.z = cluster_height + (cluster.total_gain * gain_scale) + 0.5; 
 
-            text_marker.scale.z = 0.5; // Font size
+            text_marker.scale.z = 0.2; // Font size
             text_marker.color.r = 1.0; // White text
             text_marker.color.g = 1.0;
             text_marker.color.b = 1.0;
             text_marker.color.a = 1.0;
 
-            text_marker.text = std::to_string(cluster.cluster_id); // Cluster ID as text
+            text_marker.text = "C" + std::to_string(cluster.cluster_id)+"R"+std::to_string(cluster.belong_to); // Cluster ID as text
 
             text_markers.markers.push_back(text_marker);
             centroid_points.markers.push_back(marker);
+            i++;
         }
 
         // Process adjacency matrix and edges
-        auto adj_matrix = GraphAdj2matrix(cluster_graph_ptr->adj_matr);
+        auto adj_matrix = GraphAdj2matrix(cluster_graph_ptr->adj_matrix);
 
         for (int i = 0; i < adj_matrix.size(); i++) {
             for (int j = i + 1; j < adj_matrix.size(); j++) {
-                if (adj_matrix[i][j] != 0.0) {
+                if (adj_matrix[i][j] > 0.0) {
                     gbeam2_interfaces::msg::Vertex centr_i = cluster_graph_ptr->clusters[i].centroid;
                     centr_i.z = cluster_height;
                     gbeam2_interfaces::msg::Vertex centr_j = cluster_graph_ptr->clusters[j].centroid;

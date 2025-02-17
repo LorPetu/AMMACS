@@ -1,5 +1,7 @@
 gbeam2_interfaces/Vertex centroid
+gbeam2_interfaces/Vertex expl_centroid
 int32 cluster_id
+int32 belong_to
 float32 total_gain
 int32[] nodes
 int32[] unexplored_nodes
@@ -7,3 +9,4 @@ int32[] neighbours_centroids
 int32[] bridge_nodes
 int32[] bridge_to_cluster_ids
 bool is_unmergeable
+bool is_target

@@ -144,7 +144,7 @@ float dist(gbeam2_interfaces::msg::Vertex v, geometry_msgs::msg::PointStamped p)
 float vert_graph_distance(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v);
 
 // compute minimum distance between vertex v and obstacle graph nodes
-std::pair<float,int> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v);
+std::pair<float,gbeam2_interfaces::msg::Vertex> vert_graph_distance_noobstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v);
 
 // compute minimum distance between vertex v and reachable graph nodes
 float vert_graph_distance_obstacle(gbeam2_interfaces::msg::Graph graph, gbeam2_interfaces::msg::Vertex v);
@@ -197,9 +197,16 @@ int iMaxCon(float arr[], bool con[], int size);
 //compute distances matrices of graph
 void shortestDistances(gbeam2_interfaces::msg::Graph graph, float dist[], int start);
 
+void shortestDistancesWithAdjMatrix(gbeam2_interfaces::msg::Graph graph, float dist[], int start);
+
 // compute shortest path in graph from start to end
 // using Dijkstra algorithm
 std::vector<int> dijkstra(gbeam2_interfaces::msg::Graph graph, int s, int t);
+
+// using Dijkstra but exploit matrix adjacency
+// std::vector<int> dijkstraWithAdj(gbeam2_interfaces::msg::Graph graph, int s, int t);
+
+//std::pair<std::vector<int>,double> dijkstraWithAdjandPath(gbeam2_interfaces::msg::GraphCluster graph, int s, int t);
 
 // compute best path from s to t (if t<0 it is ignored)
 std::vector<int> bestPath(gbeam2_interfaces::msg::Graph graph, int s, int t);
