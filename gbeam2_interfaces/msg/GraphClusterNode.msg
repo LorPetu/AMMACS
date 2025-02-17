@@ -1,4 +1,5 @@
 gbeam2_interfaces/Vertex centroid
+gbeam2_interfaces/Vertex expl_centroid
 int32 cluster_id
 int32 belong_to
 float32 total_gain

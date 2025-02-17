@@ -84,6 +84,45 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr cluster_nodes_labels_pub_;  
 
     float scaling;
+    
+    float packRGB(float r, float g, float b) {
+        uint32_t rgb = (static_cast<uint8_t>(r * 255) << 16) |
+                    (static_cast<uint8_t>(g * 255) << 8)  |
+                    (static_cast<uint8_t>(b * 255));
+        float rgb_float;
+        std::memcpy(&rgb_float, &rgb, sizeof(float));  // Convert int to float without precision loss
+        return rgb_float;
+    }
+
+    float getClusterColorRGB(int cluster_id, int robot_id) {
+        if (cluster_id == -2) return packRGB(0.5, 0.5, 0.5);  // Obstacle color
+        if (cluster_id == -1) return packRGB(0.5, 0.5, 0.5);  // Not clustered color
+
+        std::srand(cluster_id + robot_id * 1000);  
+        float r = static_cast<float>(std::rand() % 256) / 255.0;
+        float g = static_cast<float>(std::rand() % 256) / 255.0;
+        float b = static_cast<float>(std::rand() % 256) / 255.0;
+
+        return packRGB(r, g, b);
+    }
+
+
+    std_msgs::msg::ColorRGBA getClusterColor(int cluster_id, int robot_id) {
+        std_msgs::msg::ColorRGBA color;
+        if (cluster_id == -2) {  // Special case for obstacles
+            color.r = 0.5, color.g = 0.5, color.b = 0.5, color.a = 1;
+            return color;
+        }
+        
+        std::srand(cluster_id + robot_id * 1000); // Ensure different robots have distinct colors
+        color.r = static_cast<float>(std::rand() % 256) / 255.0;
+        color.g = static_cast<float>(std::rand() % 256) / 255.0;
+        color.b = static_cast<float>(std::rand() % 256) / 255.0;
+        color.a = 1.0;
+
+        return color;
+    }
+
 
     void graphCallback2(const gbeam2_interfaces::msg::Graph::SharedPtr graph_ptr){
 
@@ -99,6 +138,8 @@ private:
         walkable_color.r = 1, walkable_color.g = 0.1, walkable_color.b = 0.8, walkable_color.a = 0.15;
         std_msgs::msg::ColorRGBA normals_color;
         normals_color.r = 0.6, normals_color.g = 0.3, normals_color.b = 0.6, normals_color.a = 1;
+
+
 
         float normal_length = 0.2 * scaling;
 
@@ -129,7 +170,7 @@ private:
 
         // Define the PointCloud2 fields
         sensor_msgs::PointCloud2Modifier modifier(node_points_cloud);
-        modifier.setPointCloud2Fields(8,  // Number of fields: x, y, z, and side
+        modifier.setPointCloud2Fields(9,  // Number of fields: x, y, z, and side
             "x", 1, sensor_msgs::msg::PointField::FLOAT32,
             "y", 1, sensor_msgs::msg::PointField::FLOAT32,
             "z", 1, sensor_msgs::msg::PointField::FLOAT32,
@@ -137,7 +178,8 @@ private:
             "is_obstacle", 1, sensor_msgs::msg::PointField::UINT8,
             "is_compl_connected", 1,  sensor_msgs::msg::PointField::UINT8,
             "node_id", 1, sensor_msgs::msg::PointField::UINT32,
-            "cluster_id", 1, sensor_msgs::msg::PointField::INT32); 
+            "cluster_id", 1, sensor_msgs::msg::PointField::INT32,
+            "rgb", 1, sensor_msgs::msg::PointField::FLOAT32); 
 
         modifier.resize(N);  // Resize the point cloud to accommodate all points
 
@@ -150,6 +192,7 @@ private:
         sensor_msgs::PointCloud2Iterator<uint8_t> iter_is_connected(node_points_cloud, "is_compl_connected");
         sensor_msgs::PointCloud2Iterator<uint32_t> iter_node_id(node_points_cloud, "node_id");
         sensor_msgs::PointCloud2Iterator<int32_t> iter_cluster_id(node_points_cloud, "cluster_id");
+        sensor_msgs::PointCloud2Iterator<float> iter_rgb(node_points_cloud, "rgb");
 
         for (int n = 0; n < N; n++){
             auto node = graph_ptr->nodes[n];
@@ -161,10 +204,16 @@ private:
             *iter_is_obstacle = node.is_obstacle;
             *iter_is_connected = node.is_completely_connected;
             *iter_cluster_id = node.is_obstacle ? -2: node.cluster_id; 
+            *iter_rgb = getClusterColorRGB(node.cluster_id, name_space_id);  // Assign color
             
             ++iter_x; ++iter_y; ++iter_z;
             ++iter_cluster_id; ++iter_node_id; ++iter_gain;
-            ++iter_is_obstacle; ++iter_is_connected;
+            ++iter_is_obstacle; ++iter_is_connected; ++iter_rgb;
+
+           
+
+            // Assign cluster color
+            std_msgs::msg::ColorRGBA cluster_color = getClusterColor(node.cluster_id, name_space_id);
 
             // Create a text marker for each node
             visualization_msgs::msg::Marker text_marker;
@@ -332,7 +381,7 @@ private:
             marker.scale.y = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
             marker.scale.z = (cluster.total_gain * gain_scale< min_cluster_size) ? min_cluster_size : cluster.total_gain * gain_scale;
 
-            marker.color = (cluster.unexplored_nodes.empty()) ? white : robot_color[cluster.belong_to];
+            marker.color = getClusterColor(cluster.cluster_id,cluster.belong_to);//(cluster.unexplored_nodes.empty()) ? white : robot_color[cluster.belong_to];
 
             
 

@@ -1,7 +1,63 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://ros.org/wiki/xacro" name="noah_wheel">
 
-	<xacro:macro name="gazebo_specific" params="frame_prefix topic_prefix">
+	<xacro:macro name="gazebo_specific" params="frame_prefix topic_prefix collision_bitmap">
+    
+    <gazebo>
+      <static>false</static>
+      <self_collide>false</self_collide>
+    </gazebo>
+
+    <gazebo reference="base_link">
+      <material>Gazebo/Black</material>
+      <collision>
+        <surface>
+          <contact>
+            <collide_without_contact>true</collide_without_contact>
+            <collide_without_contact_bitmask>0x0F</collide_without_contact_bitmask>
+          </contact>
+        </surface>
+      </collision>
+    </gazebo>
+
+    <gazebo reference="wheel_left_link">
+      <material>Gazebo/DarkGrey</material>
+      <collision>
+        <surface>
+          <contact>
+            <collide_without_contact>false</collide_without_contact>
+            <collide_bitmask>0x0F</collide_bitmask>
+          </contact>
+          <friction>
+            <ode>
+              <mu>1.0</mu>
+              <mu2>1.0</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+    </gazebo>
+
+    <gazebo reference="wheel_right_link">
+      <material>Gazebo/DarkGrey</material>
+      <collision>
+        <surface>
+          <contact>
+            <collide_without_contact>false</collide_without_contact>
+            <collide_bitmask>0x0F</collide_bitmask>
+          </contact>
+          <friction>
+            <ode>
+              <mu>1.0</mu>
+              <mu2>1.0</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+    </gazebo>
+
+
+
     <gazebo>
       <plugin name="turtlebot3_diff_drive" filename="libgazebo_ros_diff_drive.so">
 

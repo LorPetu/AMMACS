@@ -5,6 +5,6 @@
 /**:
   ros__parameters:
     communication_range : 20.0
-    #N_robot: ${num_robots}
+    N_robot: 2
     periodic_call_time: 2
     max_no_connection_time: 10

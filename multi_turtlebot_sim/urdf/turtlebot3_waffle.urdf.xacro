@@ -15,6 +15,11 @@
   <xacro:arg name="topic_prefix" default=""/>
   <xacro:property name="topic_prefix" value="$(arg topic_prefix)"/>
 
+  <xacro:arg name="collision_bitmap" default="0x01"/>
+  <xacro:property name="collision_bitmap" value="$(arg collision_bitmap)"/>
+
+  
+
   <!-- "package://" isn't working with gazebo_ros ROS2(package is replaced by model) so it worked as a workaround to find the meshes -->
   <xacro:property name="meshes_folder" value="$(find multi_turtlebot_sim)/meshes"/>
 
@@ -76,20 +81,20 @@
       <material name="light_black"/>
     </visual>
 
-    <!-- <collision>
+    <collision>
       <origin xyz="-0.064 0 0.047" rpy="0 0 0"/>
       <geometry>
         <box size="0.266 0.266 0.094"/>
       </geometry>
-    </collision> -->
+    </collision>
 
-    <!-- <inertial>
+    <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="1.3729096e+00"/>
       <inertia ixx="8.7002718e-03" ixy="-4.7576583e-05" ixz="1.1160499e-04"
                iyy="8.6195418e-03" iyz="-3.5422299e-06"
                izz="1.4612727e-02" />
-    </inertial> -->
+    </inertial>
   </link>
 
   <joint name="wheel_left_joint" type="continuous">
@@ -113,6 +118,12 @@
       <geometry>
         <cylinder length="0.018" radius="0.033"/>
       </geometry>
+      <surface>
+    <contact>
+      <collide_without_contact>false</collide_without_contact>
+      <collide_without_contact_bitmask>${collision_bitmap} | 0x0F</collide_without_contact_bitmask>
+    </contact>
+  </surface>
     </collision>
 
     <inertial>
@@ -145,6 +156,12 @@
       <geometry>
         <cylinder length="0.018" radius="0.033"/>
       </geometry>
+      <surface>
+    <contact>
+      <collide_without_contact>false</collide_without_contact>
+      <collide_without_contact_bitmask>${collision_bitmap} | 0x0F</collide_without_contact_bitmask>
+    </contact>
+  </surface>
     </collision>
 
     <inertial>
@@ -168,11 +185,17 @@
       <geometry>
         <box size="0.030 0.009 0.020"/>
       </geometry>
+      <surface>
+    <contact>
+      <collide_without_contact>false</collide_without_contact>
+      <collide_without_contact_bitmask>${collision_bitmap} | 0x0F</collide_without_contact_bitmask>
+    </contact>
+  </surface>
     </collision>
 
     <inertial>
       <origin xyz="0 0 0" />
-      <mass value="0.005" />
+      <mass value="0.05" />
       <inertia ixx="0.001" ixy="0.0" ixz="0.0"
                iyy="0.001" iyz="0.0"
                izz="0.001" />
@@ -191,11 +214,17 @@
       <geometry>
         <box size="0.030 0.009 0.020"/>
       </geometry>
+      <surface>
+    <contact>
+      <collide_without_contact>false</collide_without_contact>
+      <collide_without_contact_bitmask>${collision_bitmap} | 0x0F</collide_without_contact_bitmask>
+    </contact>
+  </surface>
     </collision>
 
     <inertial>
       <origin xyz="0 0 0" />
-      <mass value="0.005" />
+      <mass value="0.05" />
       <inertia ixx="0.001" ixy="0.0" ixz="0.0"
                iyy="0.001" iyz="0.0"
                izz="0.001" />
@@ -226,82 +255,29 @@
       <material name="dark"/>
     </visual>
 
-    <!-- <collision>
+    <collision>
       <origin xyz="0.015 0 -0.0065" rpy="0 0 0"/>
       <geometry>
         <cylinder length="0.0315" radius="0.055"/>
       </geometry>
-    </collision> -->
+      <surface>
+    <contact>
+      <collide_without_contact>true</collide_without_contact>
+      <collide_without_contact_bitmask>${collision_bitmap}</collide_without_contact_bitmask>
+    </contact>
+  </surface>
+    </collision>
 
-    <!-- <inertial>
+    <inertial>
       <mass value="0.114" />
       <origin xyz="0 0 0" />
       <inertia ixx="0.001" ixy="0.0" ixz="0.0"
                iyy="0.001" iyz="0.0"
                izz="0.001" />
-    </inertial> -->
+    </inertial>
   </link>
 
-  <joint name="camera_joint" type="fixed">
-    <origin xyz="0.064 -0.065 0.094" rpy="0 0 0"/>
-    <parent link="base_link"/>
-    <child link="camera_link"/>
-  </joint>
 
-  <link name="camera_link">
-    <visual>
-     <origin xyz="0 0 0" rpy="1.57 0 1.57"/>
-      <geometry>
-       <mesh filename="file://${meshes_folder}/sensors/r200.dae" />
-      </geometry>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0.003 0.065 0.007" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.012 0.132 0.020"/>
-      </geometry>
-    </collision> -->
-
-    <!-- This inertial field needs doesn't contain reliable data!! -->
-<!--   <inertial>
-      <mass value="0.564" />
-      <origin xyz="0 0 0" />
-      <inertia ixx="0.003881243" ixy="0.0" ixz="0.0"
-               iyy="0.000498940" iyz="0.0"
-               izz="0.003879257" />
-    </inertial>-->
-  </link>
-
-  <joint name="camera_rgb_joint" type="fixed">
-    <origin xyz="0.005 0.018 0.013" rpy="0 0 0"/>
-    <!-- <origin xyz="${r200_cam_rgb_px} ${r200_cam_rgb_py} ${r200_cam_rgb_pz}" rpy="0 0 0"/> -->
-    <parent link="camera_link"/>
-    <child link="camera_rgb_frame"/>
-  </joint>
-  <link name="camera_rgb_frame"/>
-
-  <joint name="camera_rgb_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57 0 -1.57"/>
-    <parent link="camera_rgb_frame"/>
-    <child link="camera_rgb_optical_frame"/>
-  </joint>
-  <link name="camera_rgb_optical_frame"/>
-
-  <joint name="camera_depth_joint" type="fixed">
-    <origin xyz="0.005 0.028 0.013" rpy="0 0 0"/>
-    <!-- <origin xyz="${r200_cam_rgb_px} ${r200_cam_rgb_py + r200_cam_depth_offset} ${r200_cam_rgb_pz}" rpy="0 0 0"/> -->
-    <parent link="camera_link"/>
-    <child link="camera_depth_frame"/>
-  </joint>
-  <link name="camera_depth_frame"/>
-
-  <joint name="camera_depth_optical_joint" type="fixed">
-    <origin xyz="0 0 0" rpy="-1.57 0 -1.57"/>
-    <parent link="camera_depth_frame"/>
-    <child link="camera_depth_optical_frame"/>
-  </joint>
-  <link name="camera_depth_optical_frame"/>
-
-  <xacro:gazebo_specific frame_prefix="${frame_prefix}" topic_prefix="${topic_prefix}"/>
+  <xacro:gazebo_specific frame_prefix="${frame_prefix}" topic_prefix="${topic_prefix}" collision_bitmap="${collision_bitmap}"/>
 
 </robot>
