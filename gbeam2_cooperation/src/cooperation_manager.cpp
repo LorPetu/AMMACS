@@ -28,6 +28,7 @@
 #include "tf2_ros/transform_listener.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "std_srvs/srv/set_bool.hpp"
+#include "std_srvs/srv/trigger.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
 
 #include "gbeam2_interfaces/action/assigned_task.hpp"
@@ -84,6 +85,7 @@ public:
 
     try_clustering_service_ = this->create_client<std_srvs::srv::SetBool>("gbeam/start_cluster");
 
+    min_cluster_size_srv_ = this->create_client<std_srvs::srv::SetBool>("gbeam/min_cluster_size");
     //timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), std::bind(&CooperationNode::navigationCallback, this));
     
     // Create Action client for exploration node
@@ -180,6 +182,7 @@ private:
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  start_coop_service_;
   rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr  try_clustering_service_;
+  rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr   min_cluster_size_srv_ ;
   rclcpp_action::Client<Task>::SharedPtr action_client_;
   rclcpp_action::ClientGoalHandle<Task>::SharedPtr current_goal_handle_;
 
@@ -187,6 +190,12 @@ private:
 
   double deg_90 = M_PI / 2.0;
   double deg_30 = M_PI / 6.0;
+
+  void updateMinSize(){
+    auto request = std::make_shared<std_srvs::srv::SetBool::Request>();
+    request->data = true;
+    min_cluster_size_srv_->async_send_request(request);
+  }
 
 
 
@@ -490,7 +499,7 @@ private:
       // TODO: use clusters_ids.size() - 1 and remove condition
       for(int i=0; i<clusters_ids.size(); i++){
         auto cl = GlobalClusters.clusters[clusters_ids[i]];
-        RCLCPP_INFO(this->get_logger(),"getAssignedGraph:: Add all the %d nodes of cluster %d",name_space_id,cl.nodes.size(),cl.cluster_id);
+        RCLCPP_INFO(this->get_logger(),"[%d]getAssignedGraph:: Add all the %d nodes of cluster %d",name_space_id,cl.nodes.size(),cl.cluster_id);
         result.cluster_graph.clusters.push_back(cl);
         for(auto& node_id:cl.nodes){
           result.nodes.push_back(stored_Graph->map[cl.belong_to].nodes[node_id]);
@@ -837,6 +846,7 @@ private:
         min_unexpl_size--;
         if(min_unexpl_size>1){
           navigationCallback(false);
+          updateMinSize();
         }else{
           RCLCPP_WARN(this->get_logger(),"No more unexplored clusters!");
         } 

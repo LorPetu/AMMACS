@@ -98,6 +98,9 @@ public:
         clustering_service_ = this->create_service<std_srvs::srv::SetBool>(
         "gbeam/start_cluster",std::bind(&GraphUpdateNode::changeClusterState,this, std::placeholders::_1, std::placeholders::_2));
 
+        min_cluster_size_server_ = this->create_service<std_srvs::srv::SetBool>(
+        "gbeam/start_cluster",std::bind(&GraphUpdateNode::changeClusterState,this, std::placeholders::_1, std::placeholders::_2));
+
         //Initialize parameters
         this->declare_parameter<double>("node_dist_min",0.0);
         this->declare_parameter<double>("node_dist_open", 0.0);
@@ -172,6 +175,7 @@ private:
     std::vector<gbeam2_interfaces::msg::Bridge> external_bridges;
     std::vector<gbeam2_interfaces::msg::Bridge> candidates_bridges;
     int N_bridges=0;
+    int min_unexpl_size=3;
 
     gbeam2_interfaces::msg::Graph graph;
     gbeam2_interfaces::msg::Graph external_graph;
@@ -202,6 +206,7 @@ private:
     rclcpp::Subscription<gbeam2_interfaces::msg::GraphUpdate>::SharedPtr external_poly_sub_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr status_server_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr clustering_service_;
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr min_cluster_size_server_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr batch_values_pub_;
     std_msgs::msg::Float32MultiArray batch_values;
     
@@ -569,6 +574,15 @@ private:
         
         if(request->data){
             cluster_state = 2;
+            response->success=true;
+        }
+    }
+
+    void updateMinClSize(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+        std::shared_ptr<std_srvs::srv::SetBool::Response> response){
+        
+        if(request->data){
+            min_unexpl_size--;
             response->success=true;
         }
     }
@@ -1581,8 +1595,18 @@ private:
                 //RCLCPP_INFO(this->get_logger(),"access bridge index: %d",b);
                 auto& end1 = (it->r1!=name_space_id) ? external_graph.nodes[node_ext_index[it->r1][it->v1]] : graph.nodes[it->v1];
                 auto& end2 = (it->r2!=name_space_id) ? external_graph.nodes[node_ext_index[it->r2][it->v2]] : graph.nodes[it->v2];
+                bool cond_on_size=false;
                 
-                if(end1.cluster_id!=-1 && end2.cluster_id!=-1){
+                if(end1.belong_to==name_space_id){
+                   cond_on_size = Graphclusters.clusters[end1.cluster_id].nodes.size()>min_unexpl_size;
+                }
+                if(end2.belong_to==name_space_id){
+                   cond_on_size = Graphclusters.clusters[end2.cluster_id].nodes.size()>min_unexpl_size;
+                }
+
+
+                
+                if(end1.cluster_id!=-1 && end2.cluster_id!=-1 && cond_on_size){
                     // Check if the two end change their clustering
                     it->c1 = end1.cluster_id;
                     it->c2 = end2.cluster_id;
