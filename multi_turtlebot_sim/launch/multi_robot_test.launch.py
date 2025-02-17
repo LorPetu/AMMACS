@@ -34,7 +34,8 @@ def recordBagfor(N_robot, sim_name):
     # Topics to record
     target_topics = [
         'scan', 'gbeam/reachability_graph', 'gbeam/merged_graph', 'gbeam/target_pos_ref',
-        'gbeam/gbeam_pos_ref', 'coop/Globalclusters', 'timers', 'external_nodes', 'Task'
+        'gbeam/gbeam_pos_ref', 'coop/Globalclusters', 'timers', 'external_nodes', 'Task',
+        'gbeam/free_polytope'
     ]
 
     topic_to_record = []
@@ -47,6 +48,7 @@ def recordBagfor(N_robot, sim_name):
     # Global topic 
     topic_to_record.append('/status')
     topic_to_record.append('/tf')
+    topic_to_record.append('/clock')
 
     return ExecuteProcess(
         cmd=['ros2', 'bag', 'record', '--output', bag_dir] + topic_to_record,

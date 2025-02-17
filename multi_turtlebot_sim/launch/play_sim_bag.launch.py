@@ -92,12 +92,21 @@ def generate_launch_description():
     # Foxglove bridge
     foxglove_bridge = ExecuteProcess(cmd=["ros2", "launch", "foxglove_bridge", "foxglove_bridge_launch.xml"])
 
+    performance =  Node(
+            package='performance',  # Your package name
+            executable='anal',      # The entry point defined in setup.py
+            name='performance_node',  # Optional: set a custom node name
+            output='screen',
+            parameters=[{'namespace': 'robot0'}]  # Optional params
+        )
+
     # Add actions
     ld.add_action(num_robots_arg)
     ld.add_action(ground_param_arg)
     ld.add_action(foxglove_bridge)
     ld.add_action(OpaqueFunction(function=select_bag_file))  # Select bag file dynamically
     ld.add_action(OpaqueFunction(function=launch_setup))  # Launch ground nodes dynamically
+    ld.add_action(performance)
 
     return ld
 
