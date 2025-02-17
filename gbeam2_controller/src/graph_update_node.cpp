@@ -761,7 +761,6 @@ private:
             {
             vert.id = graph.nodes.size();
             vert.is_reachable = true;
-            vert.gain ++;
             if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
             {
                 vert.is_reachable = false;
@@ -1496,6 +1495,7 @@ private:
                     // Update graph node references
                     for (auto& node_id : it->nodes) {
                         graph.nodes[node_id].cluster_id = new_id;
+                        graph.nodes[node_id].cluster_size = it->nodes.size();
                     }
 
                     old_to_new_id[it - Graphclusters.clusters.begin()] = new_id; // Map old ID to new ID
@@ -1597,16 +1597,9 @@ private:
                 auto& end2 = (it->r2!=name_space_id) ? external_graph.nodes[node_ext_index[it->r2][it->v2]] : graph.nodes[it->v2];
                 bool cond_on_size=false;
                 
-                if(end1.belong_to==name_space_id){
-                   cond_on_size = Graphclusters.clusters[end1.cluster_id].nodes.size()>min_unexpl_size;
-                }
-                if(end2.belong_to==name_space_id){
-                   cond_on_size = Graphclusters.clusters[end2.cluster_id].nodes.size()>min_unexpl_size;
-                }
-
-
+                // check if the bridge end are clustered and belong to a not mergeable cluster
                 
-                if(end1.cluster_id!=-1 && end2.cluster_id!=-1 && cond_on_size){
+                if(end1.cluster_size>=min_unexpl_size && end2.cluster_size>=min_unexpl_size){
                     // Check if the two end change their clustering
                     it->c1 = end1.cluster_id;
                     it->c2 = end2.cluster_id;
