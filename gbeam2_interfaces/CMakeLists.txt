@@ -34,6 +34,7 @@ set(msg_files
   "msg/GlobalMap.msg"
   "srv/SetMappingStatus.srv"
   "srv/GraphUpdate.srv"
+  "srv/AreaDivision.srv"
   "action/AssignedTask.action"
 )
 
