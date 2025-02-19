@@ -51,9 +51,10 @@ def recordBagfor(N_robot, sim_name):
     topic_to_record.append('/clock')
 
     return ExecuteProcess(
-        cmd=['ros2', 'bag', 'record', '--output', bag_dir,'-a'], #+ topic_to_record,
+        cmd=['ros2', 'bag', 'record', '--output', bag_dir, '-a', '--exclude', '(.*visualization.*)'],
         output='screen'
     )
+
 
 
 def generate_launch_description():
