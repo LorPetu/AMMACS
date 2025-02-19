@@ -1,5 +1,0 @@
-gbeam2_interfaces/GraphClusterNode required_cluster
-int64 robot_id
----
-gbeam2_interfaces/GraphClusterNode resulted_cluster
-bool is_free

@@ -13,7 +13,6 @@
 #include <queue>
 #include <thread>
 #include <optional>
-#include <mutex>
 
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
@@ -36,7 +35,6 @@
 #include "gbeam2_interfaces/msg/status.hpp"
 #include "gbeam2_interfaces/msg/graph_cluster_node.hpp"
 #include "gbeam2_interfaces/msg/global_map.hpp"
-#include "gbeam2_interfaces/srv/area_division.hpp"
 #include "library_fcn.hpp"
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -44,7 +42,6 @@
 
 
 #define INF 100000
-using namespace std::chrono_literals;
 
 class CooperationNode : public rclcpp::Node
 {
@@ -52,8 +49,6 @@ public:
 
   using Task = gbeam2_interfaces::action::AssignedTask;
   explicit CooperationNode() : Node("coop_manager"){
-
-    cb_group_1 = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
 
     //SUBSCRIBED TOPICS
     odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -90,13 +85,13 @@ public:
 
     try_clustering_service_ = this->create_client<std_srvs::srv::SetBool>("gbeam/start_cluster");
 
-    min_cluster_size_client_ = this->create_client<std_srvs::srv::SetBool>("gbeam/min_cluster_size");
+    min_cluster_size_srv_ = this->create_client<std_srvs::srv::SetBool>("gbeam/min_cluster_size");
     //timer_ = this->create_wall_timer(std::chrono::milliseconds(1000), std::bind(&CooperationNode::navigationCallback, this));
     
     // Create Action client for exploration node
     this->action_client_ = rclcpp_action::create_client<Task>(
       this,
-      "Task",cb_group_1
+      "Task"
     );
     //cluster_timer_ = this->create_wall_timer(std::chrono::milliseconds(1000),std::bind(&CooperationNode::CreateClusterGraph, this));
 
@@ -127,31 +122,6 @@ public:
       last_status[i].joint_vector.resize(N_robot);
       last_status[i].normal_joint_vector.resize(N_robot);
       //cluster_l2g_index[i][0] = i;
-    }
-
-    // Area Division Server and Client 
-
-    access_provider_= this->create_service<gbeam2_interfaces::srv::AreaDivision>(
-      "require_access",std::bind(&CooperationNode::provideAccess, this,std::placeholders::_1, std::placeholders::_2)
-      ,rmw_qos_profile_services_default,cb_group_1);
-
-    access_client_.resize(N_robot);
-    // Create a client and a timer for each robot
-    std::string service_name;
-    for (int i = 0; i < N_robot; i++)
-    {   
-        service_name = "/robot"+std::to_string(i)+"/require_access";
-        if (i!=name_space_id){
-            RCLCPP_INFO(this->get_logger(),"Initialize client: %s",service_name.c_str());  
-            access_client_[i]=this->create_client<gbeam2_interfaces::srv::AreaDivision>(service_name);
-            
-        }   
-        else{
-            access_client_[i]= std::shared_ptr<rclcpp::Client<gbeam2_interfaces::srv::AreaDivision>>();  
-           
-        } 
-        
-
     }
 
   }
@@ -212,14 +182,11 @@ private:
 
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr  start_coop_service_;
   rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr  try_clustering_service_;
-  rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr   min_cluster_size_client_ ;
+  rclcpp::Client<std_srvs::srv::SetBool>::SharedPtr   min_cluster_size_srv_ ;
   rclcpp_action::Client<Task>::SharedPtr action_client_;
   rclcpp_action::ClientGoalHandle<Task>::SharedPtr current_goal_handle_;
 
-  rclcpp::Service<gbeam2_interfaces::srv::AreaDivision>::SharedPtr access_provider_;
-  std::vector<rclcpp::Client<gbeam2_interfaces::srv::AreaDivision>::SharedPtr> access_client_;
-  rclcpp::CallbackGroup::SharedPtr cb_group_1;   
-  std::mutex mutex_;
+  //rclcpp::TimerBase::SharedPtr cluster_timer_;
 
   double deg_90 = M_PI / 2.0;
   double deg_30 = M_PI / 6.0;
@@ -227,8 +194,9 @@ private:
   void updateMinSize(){
     auto request = std::make_shared<std_srvs::srv::SetBool::Request>();
     request->data = true;
-    min_cluster_size_client_->async_send_request(request);
+    min_cluster_size_srv_->async_send_request(request);
   }
+
 
 
   void printUnorderedMap(const rclcpp::Logger& logger, const std::unordered_map<int, int>& map,  const std::string& map_name = "UnorderedMap") {
@@ -354,7 +322,6 @@ private:
     // in global map. cluster_l2g_index[n][i]=j is a vector of unordered map to obtain the j id of global cluster
     // of cluster i of robot n. 
     // It enables the decision making in NavigationCallback()   
-    auto& prev_stored_Graph = stored_Graph;
 
     stored_Graph = global_map_received;
     int req_robot_id = stored_Graph->last_updater;
@@ -370,8 +337,11 @@ private:
     int offset_index=0;
     for (int i = 0; i < N_robot; i++) {
         totalSize += stored_Graph->map[i].cluster_graph.clusters.size();
+        if(i<req_robot_id){
+          offset_index += totalSize;
+        } 
 
-        auto to_add = stored_Graph->map[i].cluster_graph.clusters;
+        auto to_add = (i!=req_robot_id) ? stored_Graph->map[i].cluster_graph.clusters :graph_received.cluster_graph.clusters;
 
         GlobalClusters.clusters.insert( GlobalClusters.clusters.end(), to_add.begin(), to_add.end() );  
         cluster_l2g_index[i].clear();   
@@ -389,9 +359,28 @@ private:
         auto& cl_i = GlobalClusters.clusters[i];
         computeClusterProperties2(cl_i);  // Compute properties of the cluster
 
+        // if (cl_i.total_gain > 0.0) {
+        //     // Check if any unexplored clusters remain larger than min_unexpl_size
+        //     if (cl_i.nodes.size() > min_unexpl_size) {
+        //         should_decrease = false;  // There's still a larger unexplored cluster
+        //     } else {
+        //         should_decrease = true;   // All unexplored clusters are now <= min_unexpl_size
+        //     }
+
+        //     // Update min_unexpl_size only when larger clusters still exist
+        //     if (!should_decrease) {
+        //         min_unexpl_size = std::min(min_unexpl_size, static_cast<int>(cl_i.nodes.size()));
+        //     }
+        // }
+
         curr_tot_global_gain += cl_i.total_gain;
         cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id] = i;
     }
+
+    // // If all unexplored clusters are now <= min_unexpl_size, allow it to decrease
+    // if (should_decrease) {
+    //     min_unexpl_size--;  // Reduce minimum unexplored size
+    // }
 
     //for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
     
@@ -643,76 +632,6 @@ private:
 
   }
 
-  void provideAccess(const std::shared_ptr<gbeam2_interfaces::srv::AreaDivision::Request> request,
-                        std::shared_ptr<gbeam2_interfaces::srv::AreaDivision::Response> response){
-
-      auto& req_cl = request->required_cluster;
-      
-      RCLCPP_INFO(this->get_logger(),"[%d] Robot%d is requiring access to %d: C%d R%d", name_space_id,
-                                        request->robot_id, cluster_l2g_index[req_cl.belong_to][req_cl.cluster_id],req_cl.cluster_id, req_cl.belong_to);
-      
-      if( req_cl.belong_to ==target_cl.belong_to &&
-          req_cl.cluster_id==target_cl.cluster_id){
-        response->is_free=false;
-      }else{
-        response->resulted_cluster=req_cl;
-        response->is_free=true;
-      }
-  }
-
-
-    bool requireAreaDivision(const gbeam2_interfaces::msg::GraphClusterNode& ext_target) {
-      std::lock_guard<std::mutex> lock(mutex_);
-      auto client = access_client_[ext_target.belong_to];
-      std::atomic<bool> result{false};
-
-      if (!rclcpp::ok()) {
-        RCLCPP_ERROR(this->get_logger(), "Node is no longer valid");
-        return false;
-      }
-
-      RCLCPP_INFO(this->get_logger(), "[%d] I'm requiring access to %d: C%d R%d", 
-                  name_space_id,
-                  cluster_l2g_index[ext_target.belong_to][ext_target.cluster_id],
-                  ext_target.cluster_id, 
-                  ext_target.belong_to);
-
-      // Populate the request message
-      auto request = std::make_shared<gbeam2_interfaces::srv::AreaDivision::Request>();
-      request->required_cluster = ext_target;
-      request->robot_id = name_space_id;
-
-      // Define the callback to capture the response
-      using ServiceResponseFuture =
-          rclcpp::Client<gbeam2_interfaces::srv::AreaDivision>::SharedFutureWithRequest;
-      auto response_received_callback = 
-      [this, &result](ServiceResponseFuture future) -> void {
-        try {
-          auto response = future.get().second;
-          RCLCPP_INFO(this->get_logger(), "[%d] Received response: %s",
-                      name_space_id, (response->is_free ? "is free" : "not free"));
-          result.store(response->is_free);
-        } catch (const std::exception& e) {
-          RCLCPP_ERROR(this->get_logger(), "Error in response callback: %s", e.what());
-          result.store(false);
-        }
-      };
-
-      // Send the request asynchronously
-      auto result_future = client->async_send_request(request, response_received_callback);
-
-      // Wait for the response (timeout after 5 seconds)
-      if (result_future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
-        RCLCPP_INFO(this->get_logger(), "CLIENT[%d]: Received response", name_space_id);
-        return result.load();
-      } else {
-        RCLCPP_WARN(this->get_logger(), "CLIENT[%d]: Timeout waiting for response", name_space_id);
-        return false;
-      }
-    }
-
-
-
   std::pair<int, std::vector<int>> getBestCluster(const int start,std::vector<int> occupied_clusters){
     // Get the best cluster to explored based on the one in which i am
     // Here we should avoid to get access to occupied cluster from "status" topic
@@ -813,7 +732,6 @@ private:
   }
   
   void navigationCallback(bool avoid_last_cluster){
-    
     // Exploration based on second level Map taking into account also clusters of others robot
 
     std::vector<int> clusters_to_send;
@@ -969,6 +887,8 @@ private:
           AreaDivision_isrequired = true;
 
           // Here I should ask for area Division client and validate target
+
+          send_goal(clusters_to_send,target_cl);
           
         }else{          
           target = best_cl_id;
@@ -993,14 +913,6 @@ private:
 
     if(AreaDivision_isrequired){
 
-      if(requireAreaDivision(target_cl)){
-        RCLCPP_INFO(this->get_logger(),"[%d] Target cluster is free", name_space_id);
-        send_goal(clusters_to_send,target_cl);
-      } else{
-        RCLCPP_WARN(this->get_logger(),"[%d] Selected Target %d: C%d R%d is not available", name_space_id,
-                                            target,target_cl.cluster_id,target_cl.belong_to);
-        navigationCallback(true);
-      }
     }
 
 
@@ -1145,10 +1057,8 @@ private:
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
-    rclcpp::executors::MultiThreadedExecutor executor;
     auto node = std::make_shared<CooperationNode>();
-    executor.add_node(node);
-    executor.spin();
+    rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
 }
