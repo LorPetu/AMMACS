@@ -20,7 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'anal = performance.anal:main '
+            'anal = performance.anal:main',
+            'bag_watchdog = performance.bag_watchdog:main'
         ],
     },
 )

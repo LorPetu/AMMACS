@@ -45,6 +45,7 @@ def select_bag_file(context, *args, **kwargs):
                         {'bag_name':bag_name},
                         {'use_sim_time': True}] 
         )
+        
     ]
 
 def launch_setup(context, *args, **kwargs):
@@ -58,6 +59,7 @@ def launch_setup(context, *args, **kwargs):
         actions.append(
             GroupAction(
                 actions=[
+                    LogInfo(msg=f"Group action for robot: {robot_prefix} out of {num_robots_value}"),
                     ExecuteProcess( 
                     cmd=[[
                         # executable
@@ -110,7 +112,11 @@ def generate_launch_description():
     # Foxglove bridge
     foxglove_bridge = ExecuteProcess(cmd=["ros2", "launch", "foxglove_bridge", "foxglove_bridge_launch.xml"])
 
-    
+    watch_dog = Node(
+            package='performance',
+            executable='bag_watchdog',
+            name='bag_watchdog',        
+    )
 
     # Add actions
     ld.add_action(num_robots_arg)
@@ -120,6 +126,7 @@ def generate_launch_description():
     ld.add_action(foxglove_bridge)
     ld.add_action(OpaqueFunction(function=select_bag_file))  # Select bag file dynamically
     ld.add_action(OpaqueFunction(function=launch_setup))  # Launch ground nodes dynamically
+    ld.add_action(watch_dog)
 
 
     return ld

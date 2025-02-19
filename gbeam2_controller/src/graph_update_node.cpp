@@ -761,6 +761,7 @@ private:
             {
             vert.id = graph.nodes.size();
             vert.is_reachable = true;
+            vert.gain ++;
             if (!isInBoundary(vert, limit_xi, limit_xs, limit_yi, limit_ys))
             {
                 vert.is_reachable = false;
