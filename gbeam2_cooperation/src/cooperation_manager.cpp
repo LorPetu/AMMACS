@@ -322,6 +322,7 @@ private:
     // in global map. cluster_l2g_index[n][i]=j is a vector of unordered map to obtain the j id of global cluster
     // of cluster i of robot n. 
     // It enables the decision making in NavigationCallback()   
+    auto& prev_stored_Graph = stored_Graph;
 
     stored_Graph = global_map_received;
     int req_robot_id = stored_Graph->last_updater;
@@ -337,11 +338,8 @@ private:
     int offset_index=0;
     for (int i = 0; i < N_robot; i++) {
         totalSize += stored_Graph->map[i].cluster_graph.clusters.size();
-        if(i<req_robot_id){
-          offset_index += totalSize;
-        } 
 
-        auto to_add = (i!=req_robot_id) ? stored_Graph->map[i].cluster_graph.clusters :graph_received.cluster_graph.clusters;
+        auto to_add = stored_Graph->map[i].cluster_graph.clusters;
 
         GlobalClusters.clusters.insert( GlobalClusters.clusters.end(), to_add.begin(), to_add.end() );  
         cluster_l2g_index[i].clear();   
@@ -359,28 +357,9 @@ private:
         auto& cl_i = GlobalClusters.clusters[i];
         computeClusterProperties2(cl_i);  // Compute properties of the cluster
 
-        // if (cl_i.total_gain > 0.0) {
-        //     // Check if any unexplored clusters remain larger than min_unexpl_size
-        //     if (cl_i.nodes.size() > min_unexpl_size) {
-        //         should_decrease = false;  // There's still a larger unexplored cluster
-        //     } else {
-        //         should_decrease = true;   // All unexplored clusters are now <= min_unexpl_size
-        //     }
-
-        //     // Update min_unexpl_size only when larger clusters still exist
-        //     if (!should_decrease) {
-        //         min_unexpl_size = std::min(min_unexpl_size, static_cast<int>(cl_i.nodes.size()));
-        //     }
-        // }
-
         curr_tot_global_gain += cl_i.total_gain;
         cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id] = i;
     }
-
-    // // If all unexplored clusters are now <= min_unexpl_size, allow it to decrease
-    // if (should_decrease) {
-    //     min_unexpl_size--;  // Reduce minimum unexplored size
-    // }
 
     //for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
     
@@ -715,10 +694,10 @@ private:
   void getOccupiedClusters(std::vector<int>& occupied_clusters){
     for(int z=0; z<N_robot;z++){
         if(z!=name_space_id){
-          auto it = (cluster_l2g_index[last_status[z].current_cluster.belong_to].find(last_status[z].current_cluster.cluster_id));
-          if(it!=cluster_l2g_index[last_status[z].current_cluster.belong_to].end()){
+          auto it = (cluster_l2g_index[last_status[z].target_cluster.belong_to].find(last_status[z].target_cluster.cluster_id));
+          if(it!=cluster_l2g_index[last_status[z].target_cluster.belong_to].end()){
             RCLCPP_INFO(this->get_logger(),"[%d]Occupied Cluster || C%d R%d || by %d global index: %d",name_space_id,
-                                            last_status[z].current_cluster.cluster_id,last_status[z].current_cluster.belong_to,z,it->second);
+                                            last_status[z].target_cluster.cluster_id,last_status[z].target_cluster.belong_to,z,it->second);
 
             occupied_clusters.push_back(it->second);
           }else{

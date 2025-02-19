@@ -126,7 +126,9 @@ private:
 
   void currentClusterCallback(const gbeam2_interfaces::msg::GraphClusterNode::SharedPtr received_cluster){
     if(received_cluster->is_target){
+      RCLCPP_INFO(this->get_logger(),"I received a Target cluster");
       curr_status[name_space_id].target_cluster=*received_cluster;
+      status_pub_->publish(curr_status[name_space_id]);
     }else{
       curr_status[name_space_id].current_cluster=*received_cluster;
     }
