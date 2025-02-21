@@ -116,7 +116,7 @@ def generate_launch_description():
             bitmap= f'0x{idx}0'
 
             actions.append(TimerAction(
-                period=offset + idx*10.0,  # Delay to avoid simultaneous launches
+                period=offset + idx*2.0,  # Delay to avoid simultaneous launches
                 actions=[
                     launch_spawn_gbeam2(namespace, lidar_height, x_pose, y_pose, num_robots,bitmap),
                 ]
