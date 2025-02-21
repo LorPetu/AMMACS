@@ -1,0 +1,45 @@
+## mportant: if the name is not exactly the same as the node name, parameters won’t be loaded, 
+## and ROS2 will not display the error. In this case, your node name (which can be different 
+## from the executable name)
+
+/**:
+  ros__parameters:
+      node_dist_open: 0.3
+      safe_dist: 0.2
+      limit_xi: -2.5          #-1.0
+      limit_xs:  2.5              #1.0
+      limit_yi:  -2.5             #-1.0
+      limit_ys: 2.5               #1.0
+      N_robot: 2 
+
+/**/poly_gen:
+  ros__parameters:
+    update_freq: 2.0 # Hz     #2.0
+    num_vertices: 6        # 6
+    dist_step: 0.05  # m     #0.1
+    start_dist: 0.15 #0.15  # m
+    obstacle_d_thr: 0.1    # 0.05  # m
+    obst_dist_min: 0.1 #m
+    rotating_poly: false
+
+/**/graph_update:
+  ros__parameters:
+    node_dist_min: 0.05
+    node_dist_open: 0.3
+    node_bound_dist: 0.2
+    obstacle_margin: 0.15 #0.05
+    max_lenght_edge: 0.75 #At least 2x node_dist_open
+
+
+/**/graph_expl:
+  ros__parameters:
+    distance_exp: 4.0
+    reached_tol: 0.1
+
+
+
+
+
+
+
+

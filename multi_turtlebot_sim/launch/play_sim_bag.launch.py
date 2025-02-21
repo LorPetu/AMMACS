@@ -115,7 +115,8 @@ def generate_launch_description():
     watch_dog = Node(
             package='performance',
             executable='bag_watchdog',
-            name='bag_watchdog',        
+            name='bag_watchdog',
+            parameters=[{'use_sim_time': False}]        
     )
 
     # Add actions

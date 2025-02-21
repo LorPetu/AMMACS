@@ -11,7 +11,7 @@ import os
 def launch_spawn_gbeam2(namespace, lidar, x_pose, y_pose,num_robot,bitmap):
     launch =  IncludeLaunchDescription(
                     PythonLaunchDescriptionSource(
-                        os.path.join(get_package_share_directory('multi_turtlebot_sim'), 'launch', 'spawn_bot_with_gbeam2.launch.py')
+                        os.path.join(get_package_share_directory('multi_turtlebot_sim'), 'launch', 'spawn_old_GBEAM_agent.launch.py')
                     ),
                     launch_arguments={
                         'N_robot' : num_robot,
@@ -33,7 +33,7 @@ def recordBagfor(N_robot, sim_name):
 
     # Topics to record
     target_topics = [
-        'scan', 'gbeam/reachability_graph', 'gbeam/merged_graph', 'gbeam/target_pos_ref',
+        'scan', 'odom','gbeam/reachability_graph', 'gbeam/merged_graph', 'gbeam/target_pos_ref',
         'gbeam/gbeam_pos_ref', 'coop/Globalclusters', 'timers', 'external_nodes', 'Task',
         'gbeam/free_polytope'
     ]
@@ -51,7 +51,7 @@ def recordBagfor(N_robot, sim_name):
     topic_to_record.append('/clock')
 
     return ExecuteProcess(
-        cmd=['ros2', 'bag', 'record', '--output', bag_dir] + topic_to_record,
+        cmd=['ros2', 'bag', 'record', '--output', bag_dir, '-a', '--exclude', '(.*visualization.*)'],
         output='screen'
     )
 
@@ -115,7 +115,7 @@ def generate_launch_description():
             bitmap= f'0x{idx}0'
 
             actions.append(TimerAction(
-                period=offset + idx*10.0,  # Delay to avoid simultaneous launches
+                period=offset + idx*2.0,  # Delay to avoid simultaneous launches
                 actions=[
                     launch_spawn_gbeam2(namespace, lidar_height, x_pose, y_pose, num_robots,bitmap),
                 ]
