@@ -8,20 +8,39 @@ from launch.actions import DeclareLaunchArgument, LogInfo, IncludeLaunchDescript
 from launch.substitutions import LaunchConfiguration
 import os
 #/home/lor/GBEAM2_MultiUAV/src/multi_turtlebot_sim/launch/spawn_cooperative_agent.launch.py
-def launch_spawn_gbeam2(namespace, lidar, x_pose, y_pose,num_robot,bitmap):
-    launch =  IncludeLaunchDescription(
+def launch_spawn_gbeam2(namespace, lidar, x_pose, y_pose,num_robot,bitmap,robot_index):
+
+    if num_robot != 1:
+        launch =  IncludeLaunchDescription(
                     PythonLaunchDescriptionSource(
                         os.path.join(get_package_share_directory('multi_turtlebot_sim'), 'launch', 'spawn_old_GBEAM_agent.launch.py')
                     ),
                     launch_arguments={
-                        'N_robot' : num_robot,
                         'robot_prefix': namespace,
                         'lidar_height': str(lidar),  # Ensure parameters are passed as strings
                         'coll_bitmap': str(bitmap),
                         'x_pose': str(x_pose),
                         'y_pose': str(y_pose),
+                        'limit_xi': '0.0' if robot_index == 0 else '-2.5',
+                        'limit_xs': '2.5' if robot_index == 0 else '0.0',
+                        'limit_yi' : '-2.5' ,            #-1.0
+                        'limit_ys' : '2.5'             #1.0 
                     }.items()
                 )
+    else:
+        launch =  IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
+                            os.path.join(get_package_share_directory('multi_turtlebot_sim'), 'launch', 'spawn_old_GBEAM_agent.launch.py')
+                        ),
+                        launch_arguments={
+                            'N_robot' : num_robot,
+                            'robot_prefix': namespace,
+                            'lidar_height': str(lidar),  # Ensure parameters are passed as strings
+                            'coll_bitmap': str(bitmap),
+                            'x_pose': str(x_pose),
+                            'y_pose': str(y_pose),
+                        }.items()
+                    )
     return launch
 
 def recordBagfor(N_robot, sim_name):
@@ -62,7 +81,7 @@ def generate_launch_description():
 
     # Declare launch arguments
     num_robots_arg  = DeclareLaunchArgument('num_robots', default_value='2', description='Number of robots to simulate')
-    positions_arg   = DeclareLaunchArgument('robot_positions', default_value="[(1.5, -1.8), (1.65, -0.18)]", description='Positions of robots')
+    positions_arg   = DeclareLaunchArgument('robot_positions', default_value="[(1.5, -1.8), (-1.5, -0.18)]", description='Positions of robots')
     sim_name_arg    = DeclareLaunchArgument('sim_name', default_value='my_simulation', description='Name of the simulation')
 
     # Retrieve launch configurations
@@ -115,9 +134,9 @@ def generate_launch_description():
             bitmap= f'0x{idx}0'
 
             actions.append(TimerAction(
-                period=offset + idx*2.0,  # Delay to avoid simultaneous launches
+                period=offset + idx*4.0,  # Delay to avoid simultaneous launches
                 actions=[
-                    launch_spawn_gbeam2(namespace, lidar_height, x_pose, y_pose, num_robots,bitmap),
+                    launch_spawn_gbeam2(namespace, lidar_height, x_pose, y_pose, num_robots,bitmap,idx),
                 ]
             ))
 

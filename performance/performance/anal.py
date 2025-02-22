@@ -45,9 +45,10 @@ class ExplorationAnalyzer(Node):
         self.N_robots = self.get_cell_value_from_csv(self.bag_name,"N_ROBOTS")
         self.CONFIG = self.get_cell_value_from_csv(self.bag_name,"CONFIG")
 
+        self.get_logger().info(f"Bag analysis for robot{self.robot_index} in {self.CONFIG} for {self.N_robots} robots")
+
         # Subscribers with namespace support
         self.create_subscription(Graph, f"{self.namespace}/gbeam/reachability_graph", self.graph_callback, 1)
-        self.create_subscription(GlobalMap, f"{self.namespace}/gbeam/merged_graph", self.global_callback, 1)
         self.create_subscription(GlobalMap, f"{self.namespace}/gbeam/merged_graph", self.global_callback, 1)
         self.create_subscription(Odometry, f"{self.namespace}/odom", self.odomCallback, 1)
 
@@ -62,11 +63,21 @@ class ExplorationAnalyzer(Node):
 
         # Storage for computation
         self.graph_data = Graph()
-        self.global_map = GlobalMap()
-        self.explored_nodes = []
-        self.null_expl_nodes =[]
+        self.global_map = GlobalMap(map=[Graph() for _ in range(self.N_robots)])
+        self.explored_nodes  = []
+        self.null_expl_nodes = []
         self.pos_vert = Vertex()
         self.start_pos = None
+
+
+        # Additional variable for GBEAM 2 robots config 
+        if self.CONFIG == "GBEAM":
+            self.get_logger().info("GBEAM configuration detected.")
+            other_namespace = "robot1" if self.robot_index == 0 else "robot0"
+            self.create_subscription(Graph, f"/{other_namespace}/gbeam/reachability_graph", self.external_graph_callback, 1)
+            self.get_logger().info(f"External graph subscribing...  /{other_namespace}/gbeam/reachability_graph")
+            self.external_graph_data = Graph()
+
 
     @staticmethod
     def dist(v: Vertex, u: Vertex) -> float:
@@ -239,19 +250,36 @@ class ExplorationAnalyzer(Node):
             self.timer_active = True
             #self.get_logger().info("Exploration timer started (ROS time).")
 
-        # # Compare with previous graph
-        # if hasattr(self, 'graph_data'):
-        #     self.catchGraphChange(self.graph_data, graph)
+        if hasattr(self, 'graph_data') and self.N_robots is not None and (self.N_robots == 1 or (self.N_robots == 2 and self.CONFIG == "GBEAM")):
+            # Compare with previous graph
+            self.catchGraphChange(self.graph_data, graph)
+            
+
+        
 
         # Store the current graph as the new previous state
         self.graph_data = graph
+
+    def external_graph_callback(self, ext_graph: Graph):
+        """Process graph data to analyze exploration per agent and detect changes."""
+        
+        if not self.timer_active:
+            self.start_time = self.get_clock().now()
+            self.timer_active = True
+            #self.get_logger().info("Exploration timer started (ROS time).")
+
+            
+
+        # Store the current graph as the new previous state
+        self.external_graph_data = ext_graph
+
 
 
     def catchGraphChange(self, prev: Graph, curr: Graph):
         """Detect changes in the 'gain' attribute for each node in the graph."""
         
         if prev is None:
-            #self.get_logger().info("No previous graph data available.")
+            self.get_logger().info("No previous graph data available.")
             return
         
         # Create a dictionary mapping node IDs to their 'gain' values from the previous graph
@@ -261,11 +289,11 @@ class ExplorationAnalyzer(Node):
             prev_gain = prev_dict.get(node.id, None)  # Get previous gain if the node existed
 
             if prev_gain is not None and prev_gain != node.gain:
-                #self.get_logger().info(f"distance from node {node.id} : {self.dist(self.pos_vert, node)}")
+                self.get_logger().info(f"distance from node {node.id} : {self.dist(self.pos_vert, node)}")
                 if self.dist(self.pos_vert, node)<= 0.30:
                     self.explored_nodes.append(node)
-                    #self.get_logger().info("I explored a node")
-                #self.get_logger().info(f"Node {node.id}: gain changed from {prev_gain:.2f} to {node.gain:.2f}")
+                    self.get_logger().info("I explored a node")
+                self.get_logger().info(f"Node {node.id}: gain changed from {prev_gain:.2f} to {node.gain:.2f}")
 
             # Check if the node is newly added and has an initial gain of 0.0
             elif prev_gain is None and node.gain == 0.0:
@@ -346,10 +374,16 @@ class ExplorationAnalyzer(Node):
         self.update_cell_in_csv(self.bag_name,"EDGE_DENSITY",edge_density)
         self.update_cell_in_csv(self.bag_name,"CLUSTERS",tot_clusters)
         self.update_cell_in_csv(self.bag_name,"EXPLORED_N", len(self.explored_nodes))
+
         count = 0
-        for n in self.null_expl_nodes:
-            if n.belong_to == self.robot_index:
-                count +=1
+        if self.CONFIG == "GBEAM":
+            # Belong_to attribute is only available in MAGEAM configuration
+            count = len(self.null_expl_nodes)
+        else:        
+            for n in self.null_expl_nodes:
+                if n.belong_to == self.robot_index:
+                    count +=1
+        
         self.update_cell_in_csv(self.bag_name,"INSIDE_N", count)
 
         # CLUSTERS_MIN_2	CLUSTERS_MIN_1	CLUSTERS_AVG_SIZE
@@ -363,6 +397,10 @@ class ExplorationAnalyzer(Node):
 
 
         self.update_cell_in_csv(self.bag_name,"GRAPH_COVERAGE",self.compute_union_area(self.graph_data.nodes, 0.25))
+
+        if self.CONFIG == "GBEAM" and self.N_robots == 2:
+            self.global_map.map[self.robot_index] = self.graph_data
+            self.global_map.map[1 if self.robot_index == 0 else 0] = self.external_graph_data
 
         self.update_cell_in_csv(self.bag_name,"OVERLAP_N",self.computeOverlappingNodes())
         

@@ -615,7 +615,7 @@ private:
     // Get the best cluster to explored based on the one in which i am
     // Here we should avoid to get access to occupied cluster from "status" topic
     
-    float exp_distance = 1.0;
+    float exp_distance = 2.0;
     double dist_scaling = 10.0; 
     double best_reward =-1.0;
     int best_cluster_id=-1;

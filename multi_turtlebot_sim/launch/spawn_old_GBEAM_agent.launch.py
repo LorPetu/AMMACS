@@ -39,6 +39,15 @@ def generate_launch_description():
     y_pose_arg = DeclareLaunchArgument('y_pose', default_value='0.0')
     y_pose = LaunchConfiguration('y_pose')
 
+    limit_xi_arg = DeclareLaunchArgument('limit_xi', default_value='-2.5')          
+    limit_xs_arg = DeclareLaunchArgument('limit_xs', default_value= '2.5')              
+    limit_yi_arg = DeclareLaunchArgument('limit_yi', default_value='-2.5')             
+    limit_ys_arg = DeclareLaunchArgument('limit_ys', default_value='2.5')             
+
+    limit_xi = LaunchConfiguration('limit_xi')          
+    limit_xs = LaunchConfiguration('limit_xs')              
+    limit_yi = LaunchConfiguration('limit_yi')             
+    limit_ys = LaunchConfiguration('limit_ys')               
 
 
 
@@ -146,7 +155,11 @@ def generate_launch_description():
 
     # Gbeam controller launch 
 
-   
+    gbeam2_parameter = [LaunchConfiguration('global_param'), {"N_robot": N_robot}]
+
+    if N_robot != '1':
+        gbeam2_parameter.extend([{"limit_xi" : limit_xi} ,{"limit_xs":limit_xs} ,{"limit_yi":limit_yi} ,{"limit_ys":limit_ys} ])
+
 
     gbeam2_launch =   GroupAction(
         actions=[
@@ -160,9 +173,9 @@ def generate_launch_description():
             # poly_gen
             Node(
                 package = 'old_gbeam2_controller',
-                name = 'poly_gen',                  ##qua il node name è poly_gen, il nome che viene dato alla classe nel polytope_generation_node
+                name = 'poly_gen',               
                 executable = 'polytope_generation_node',
-                parameters = [LaunchConfiguration( 'global_param')],
+                parameters = gbeam2_parameter,
                 namespace= robot_prefix
             ),
 
@@ -171,7 +184,7 @@ def generate_launch_description():
                 package = 'old_gbeam2_controller',
                 name = 'graph_update',                  
                 executable = 'graph_update_node',
-                parameters = [LaunchConfiguration( 'global_param'), {"N_robot": N_robot}],
+                parameters = gbeam2_parameter,
                 namespace=robot_prefix,
                 # depends_on = ['poly_gen']
             ),
@@ -180,7 +193,7 @@ def generate_launch_description():
                 package = 'old_gbeam2_controller',
                 name = 'graph_expl',                 
                 executable = 'exploration_node',
-                parameters = [LaunchConfiguration( 'global_param'), {"N_robot": N_robot}], 
+                parameters = gbeam2_parameter, 
                 namespace=robot_prefix,
                 # depends_on = ['graph_update']
             )            
@@ -239,6 +252,10 @@ def generate_launch_description():
     ld.add_action(robot_prefix_arg)
     ld.add_action(use_sim_time_arg)
     ld.add_action(coll_bitmap_arg)
+    ld.add_action(limit_xi_arg)
+    ld.add_action(limit_xs_arg)
+    ld.add_action(limit_yi_arg)
+    ld.add_action(limit_ys_arg)
 
     # - Spawner and world interactions
     ld.add_action(robot_state_publisher)
