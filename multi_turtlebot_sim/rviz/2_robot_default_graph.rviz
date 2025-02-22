@@ -6,9 +6,10 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /Robot0 - Edges1/Topic1
-        - /Marker2
-      Splitter Ratio: 0.5
+        - /Marker1
+        - /MarkerArray1
+        - /Axes1
+      Splitter Ratio: 0.5382353067398071
     Tree Height: 555
   - Class: rviz_common/Selection
     Name: Selection
@@ -21,6 +22,7 @@ Panels:
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
+      - /TopDownOrtho1
     Name: Views
     Splitter Ratio: 0.5
   - Class: rviz_common/Time
@@ -67,11 +69,11 @@ Visualization Manager:
       Max Intensity: 0
       Min Color: 0; 0; 0
       Min Intensity: 0
-      Name: LaserScan
+      Name: Robot0 - scan
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.05000000074505806
+      Size (m): 0.02500000037252903
       Style: Flat Squares
       Topic:
         Depth: 5
@@ -161,7 +163,7 @@ Visualization Manager:
       Channel Name: intensity
       Class: rviz_default_plugins/LaserScan
       Color: 255; 255; 255
-      Color Transformer: Intensity
+      Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
@@ -169,11 +171,11 @@ Visualization Manager:
       Max Intensity: 0
       Min Color: 0; 0; 0
       Min Intensity: 0
-      Name: LaserScan
+      Name: Robot1 - scan
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.009999999776482582
+      Size (m): 0.02500000037252903
       Style: Flat Squares
       Topic:
         Depth: 5
@@ -185,22 +187,61 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
-    - Class: rviz_default_plugins/Marker
+    - Alpha: 1
+      Class: rviz_default_plugins/Polygon
+      Color: 255; 0; 0
       Enabled: true
-      Name: Robot0 - Edges
-      Namespaces:
-        graph_drawer: true
+      Name: Robot0 - PolyObs
       Topic:
         Depth: 5
         Durability Policy: Volatile
-        Filter size: 1
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /robot0/gbeam_visualization/graph_edges
+        Value: /robot0/gbeam_visualization/poly_obstacles
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/Polygon
+      Color: 25; 255; 0
+      Enabled: true
+      Name: Robot1 - PolyReach
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot1/gbeam_visualization/poly_reachable
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/Polygon
+      Color: 255; 0; 0
+      Enabled: true
+      Name: Robot1 - PolyObs
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot1/gbeam_visualization/poly_obstacles
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/Polygon
+      Color: 25; 255; 0
+      Enabled: true
+      Name: Robot0 - PolyReach
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot0/gbeam_visualization/poly_reachable
       Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
-      Name: Marker
+      Name: Robot1 - Edges
       Namespaces:
         graph_drawer: true
       Topic:
@@ -211,29 +252,98 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /robot1/gbeam_visualization/graph_edges
       Value: true
-    - Class: rviz_default_plugins/MarkerArray
+    - Class: rviz_default_plugins/Marker
       Enabled: true
-      Name: MarkerArray
+      Name: Robot0 - Edges
       Namespaces:
-        node_labels: true
+        graph_drawer: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /robot0/gbeam_visualization/graph_node_labels
+        Value: /robot0/gbeam_visualization/graph_edges
       Value: true
-    - Class: rviz_default_plugins/MarkerArray
+    - Alpha: 1
+      Axes Length: 1
+      Axes Radius: 0.10000000149011612
+      Class: rviz_default_plugins/Pose
+      Color: 255; 25; 0
       Enabled: true
-      Name: MarkerArray
-      Namespaces:
-        node_labels: true
+      Head Length: 0.30000001192092896
+      Head Radius: 0.10000000149011612
+      Name: Robot0 - PosRef
+      Shaft Length: 1
+      Shaft Radius: 0.05000000074505806
+      Shape: Arrow
       Topic:
         Depth: 5
         Durability Policy: Volatile
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /robot1/gbeam_visualization/graph_node_labels
+        Value: /robot0/gbeam/gbeam_pos_ref
+      Value: true
+    - Alpha: 1
+      Axes Length: 1
+      Axes Radius: 0.10000000149011612
+      Class: rviz_default_plugins/Pose
+      Color: 255; 25; 0
+      Enabled: true
+      Head Length: 0.30000001192092896
+      Head Radius: 0.10000000149011612
+      Name: Robot0 - TargetRef
+      Shaft Length: 1
+      Shaft Radius: 0.05000000074505806
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot0/gbeam/target_pos_ref
+      Value: true
+    - Alpha: 1
+      Axes Length: 1
+      Axes Radius: 0.10000000149011612
+      Class: rviz_default_plugins/Pose
+      Color: 255; 25; 0
+      Enabled: true
+      Head Length: 0.30000001192092896
+      Head Radius: 0.10000000149011612
+      Name: Robot1 - PosRef
+      Shaft Length: 1
+      Shaft Radius: 0.05000000074505806
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot1/gbeam/gbeam_pos_ref
+      Value: true
+    - Alpha: 1
+      Axes Length: 1
+      Axes Radius: 0.10000000149011612
+      Class: rviz_default_plugins/Pose
+      Color: 255; 25; 0
+      Enabled: true
+      Head Length: 0.30000001192092896
+      Head Radius: 0.10000000149011612
+      Name: Robot1 - TargetRef
+      Shaft Length: 1
+      Shaft Radius: 0.05000000074505806
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot1/gbeam/target_pos_ref
       Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
@@ -247,6 +357,25 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /status_visualization/robot_triangle
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: MarkerArray
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /status_visualization/robot_triangle_array
+      Value: true
+    - Class: rviz_default_plugins/Axes
+      Enabled: true
+      Length: 0.30000001192092896
+      Name: Axes
+      Radius: 0.05000000074505806
+      Reference Frame: robot0/base_footprint
       Value: true
   Enabled: true
   Global Options:
@@ -293,7 +422,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: 5.550682544708252e-07
+      Angle: -1.549999475479126
       Class: rviz_default_plugins/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
@@ -303,32 +432,27 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 99.2011489868164
-      Target Frame: world
+      Scale: 133.4143524169922
+      Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz_default_plugins)
-      X: 0.1673143357038498
-      Y: 0.27147963643074036
+      X: 0.17645186185836792
+      Y: 0.32763195037841797
     Saved:
-      - Class: rviz_default_plugins/XYOrbit
-        Distance: 10
+      - Angle: -1.5799994468688965
+        Class: rviz_default_plugins/TopDownOrtho
         Enable Stereo Rendering:
           Stereo Eye Separation: 0.05999999865889549
           Stereo Focal Distance: 1
           Swap Stereo Eyes: false
           Value: false
-        Focal Point:
-          X: -0.3888075351715088
-          Y: 1.4554698467254639
-          Z: 0
-        Focal Shape Fixed Size: false
-        Focal Shape Size: 0.05000000074505806
         Invert Z Axis: false
-        Name: XYOrbit
+        Name: TopDownOrtho
         Near Clip Distance: 0.009999999776482582
-        Pitch: 1.5697963237762451
-        Target Frame: world
-        Value: XYOrbit (rviz_default_plugins)
-        Yaw: 1.5753974914550781
+        Scale: 108.03849029541016
+        Target Frame: <Fixed Frame>
+        Value: TopDownOrtho (rviz_default_plugins)
+        X: 0.09501346945762634
+        Y: -0.5807371735572815
 Window Geometry:
   Displays:
     collapsed: false
@@ -345,5 +469,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1200
-  X: 1056
-  Y: 168
+  X: 2384
+  Y: 86
