@@ -278,17 +278,17 @@ private:
         int bridge_end_id = (start_node.belong_to == target_bridge.r1) ? target_bridge.v1 : target_bridge.v2;
         int bridge_end_belong_to = (start_node.belong_to == target_bridge.r1) ? target_bridge.r1 : target_bridge.r2;
 
-        RCLCPP_INFO(this->get_logger(),"[%d]MoveToBridge:: bridge end id: %d", name_space_id, bridge_end_id);
+        //RCLCPP_INFO(this->get_logger(),"[%d]MoveToBridge:: bridge end id: %d", name_space_id, bridge_end_id);
 
         auto it = new_mapping[bridge_end_belong_to].find(bridge_end_id);
         if(it!=new_mapping[bridge_end_belong_to].end()){
             // I have a corresponding mapping
             local_target = it->second;
-            RCLCPP_INFO(this->get_logger(), "[%d]MoveToBridge:: bridge end remapping n: %d",name_space_id, local_target);
+            //RCLCPP_INFO(this->get_logger(), "[%d]MoveToBridge:: bridge end remapping n: %d",name_space_id, local_target);
         }else{
             RCLCPP_WARN(this->get_logger(), "[%d]MoveToBridge:: No mapping for this bridge end.",name_space_id);
         } 
-        RCLCPP_INFO(this->get_logger(),"[%d]MoveToBridge:: bridge end id: %d local target: %d", name_space_id, bridge_end_id,local_target);
+        //RCLCPP_INFO(this->get_logger(),"[%d]MoveToBridge:: bridge end id: %d local target: %d", name_space_id, bridge_end_id,local_target);
 
         // Compute the path from the last reached node (curr_node) and the the end to that bridge (local_target)
         path = dijkstraWithAdj(graph, start, local_target,bridge_end_belong_to).second;
@@ -319,16 +319,20 @@ private:
     }
 
     // Handle cancellation requests
-    rclcpp_action::CancelResponse handle_cancel( const std::shared_ptr<rclcpp_action::ServerGoalHandle<Task>> goal_handle)
+    rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<rclcpp_action::ServerGoalHandle<Task>> goal_handle)
     {
         RCLCPP_INFO(this->get_logger(), "Received request to cancel goal");
+        if (active_goal_handle_ == goal_handle)
+        {
+            active_goal_handle_.reset();
+        }
         return rclcpp_action::CancelResponse::ACCEPT;
     }
 
     // Handle accepted goals
     void handle_accepted(const std::shared_ptr<rclcpp_action::ServerGoalHandle<Task>> goal_handle)
     {
-        RCLCPP_INFO(this->get_logger(), "Accepted goal");
+        //RCLCPP_INFO(this->get_logger(), "Accepted goal");
 
         // Store the active goal handle
         active_goal_handle_ = goal_handle;
@@ -387,9 +391,9 @@ private:
         auto feedback = std::make_shared<Task::Feedback>();        
         auto result = std::make_shared<Task::Result>();
         
-        RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: #################NEW GOAL################" ,name_space_id);
-        RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: explore cluster %d of robot%d", name_space_id,goal->cluster_id_task, goal->belong_to);
-        RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: ########################################" ,name_space_id);
+        //RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: #################NEW GOAL################" ,name_space_id);
+        //RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: explore cluster %d of robot%d", name_space_id,goal->cluster_id_task, goal->belong_to);
+        //RCLCPP_INFO(this->get_logger(),"[%d]Execute goal: ########################################" ,name_space_id);
 
         // -- Remapping all the nodes index
         for(int z=0;z<N_robot;z++){new_mapping[z].clear();}
@@ -420,10 +424,10 @@ private:
             next = getMapping(next_node);
             target = getMapping(target_node); 
 
-            RCLCPP_INFO(this->get_logger(),"[%d]LS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ",  name_space_id,
-                                start,start_node.id,start_node.belong_to,
-                                curr,curr_node.id,curr_node.belong_to,
-                                target,target_node.id,target_node.belong_to);
+            // RCLCPP_INFO(this->get_logger(),"[%d]LS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ",  name_space_id,
+            //                     start,start_node.id,start_node.belong_to,
+            //                     curr,curr_node.id,curr_node.belong_to,
+            //                     target,target_node.id,target_node.belong_to);
 
             if(curr==target && curr!=-1){
                 // The curr node is the last target. Previous goal completed, last target_reached
@@ -446,10 +450,10 @@ private:
                 RCLCPP_WARN(this->get_logger(),"execute:: Taking the closest node  n: %d id: %d R:", curr, curr_node.id, curr_node.belong_to);
             }
 
-            RCLCPP_INFO(this->get_logger(),"[%d]NS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ",  name_space_id,
-                                start,start_node.id,start_node.belong_to,
-                                curr,curr_node.id,curr_node.belong_to,
-                                target,target_node.id,target_node.belong_to);
+            // RCLCPP_INFO(this->get_logger(),"[%d]NS: n:%d id:%d R%d || C: n:%d id:%d R%d || LT: n:%d id:%d R%d ",  name_space_id,
+            //                     start,start_node.id,start_node.belong_to,
+            //                     curr,curr_node.id,curr_node.belong_to,
+            //                     target,target_node.id,target_node.belong_to);
            
         }
 
@@ -460,10 +464,10 @@ private:
         if(has_target_bridge){
             // I need to go to an external cluster and get to a bridge end to crossing it
             auto target_bridge = goal->target_bridge[crossed_bridges];
-            RCLCPP_INFO(this->get_logger(),"[%d]->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ",  name_space_id,
-                                                            crossed_bridges+1, tot_bridges,
-                                                            target_bridge.v1, target_bridge.c1, target_bridge.r1,
-                                                            target_bridge.v2, target_bridge.c2, target_bridge.r2, target_bridge.length);
+            // RCLCPP_INFO(this->get_logger(),"[%d]->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ",  name_space_id,
+            //                                                 crossed_bridges+1, tot_bridges,
+            //                                                 target_bridge.v1, target_bridge.c1, target_bridge.r1,
+            //                                                 target_bridge.v2, target_bridge.c2, target_bridge.r2, target_bridge.length);
             target = moveToBridge(target_bridge);
             target_node = graph.nodes[target];
 
@@ -529,17 +533,17 @@ private:
                     // And end of a bridge has been reached as a local target and bridge has to be crossed
                     // with according graph switch
 
-                    RCLCPP_INFO(this->get_logger(),"[%d]execute:: one Bridge end is reached! ",name_space_id);
+                    //RCLCPP_INFO(this->get_logger(),"[%d]execute:: one Bridge end is reached! ",name_space_id);
 
                     auto& trasp_bridge = goal->target_bridge[crossed_bridges];
 
-                    RCLCPP_INFO(this->get_logger(),"[%d]execute:: Last reached node belong to: %d",name_space_id,curr_node.belong_to );
+                    //RCLCPP_INFO(this->get_logger(),"[%d]execute:: Last reached node belong to: %d",name_space_id,curr_node.belong_to );
 
                     // Enumeration based on the owner of the OTHER end
                     int bridge_end_id = (curr_node.belong_to == trasp_bridge.r1) ? trasp_bridge.v2 : trasp_bridge.v1;
                     int bridge_end_belong_to = (curr_node.belong_to == trasp_bridge.r1) ? trasp_bridge.r2 : trasp_bridge.r1; 
 
-                    RCLCPP_INFO(this->get_logger(),"[%d]execute:: crossing to other end... node id: %d belong to: %d",name_space_id,bridge_end_id,bridge_end_belong_to);
+                    //RCLCPP_INFO(this->get_logger(),"[%d]execute:: crossing to other end... node id: %d belong to: %d",name_space_id,bridge_end_id,bridge_end_belong_to);
 
                 
                    
@@ -549,7 +553,7 @@ private:
                         // I have a corresponding mapping
                         start = it->second;
                         start_node =graph.nodes[start];
-                        RCLCPP_INFO(this->get_logger(),"[%d]execute:: New Mapping of the bridge end is n: %d id: %d",name_space_id,new_mapping[bridge_end_belong_to][bridge_end_id], bridge_end_id);
+                        //RCLCPP_INFO(this->get_logger(),"[%d]execute:: New Mapping of the bridge end is n: %d id: %d",name_space_id,new_mapping[bridge_end_belong_to][bridge_end_id], bridge_end_id);
                     }else{
                         start_node = vert_graph_distance_noobstacle(graph,getCurrPos()).second; 
                         start = start_node.id;
@@ -574,10 +578,10 @@ private:
                         target_node     =   graph.nodes[target];
                         path            =   bestpair.second;
 
-                        RCLCPP_INFO(this->get_logger(),"[%d]I from start: n:%d id:%d R%d || Go to T: n:%d id:%d R%d but C: n:%d id:%d R%d ",name_space_id,
-                                                                start,start_node.id,start_node.belong_to,
-                                                                curr,curr_node.id,curr_node.belong_to,
-                                                                target,target_node.id,target_node.belong_to);
+                        // RCLCPP_INFO(this->get_logger(),"[%d]I from start: n:%d id:%d R%d || Go to T: n:%d id:%d R%d but C: n:%d id:%d R%d ",name_space_id,
+                        //                                         start,start_node.id,start_node.belong_to,
+                        //                                         curr,curr_node.id,curr_node.belong_to,
+                        //                                         target,target_node.id,target_node.belong_to);
                         // Add a dummy vertex at the begin of the path, in order to have the start end bridge as second element 
                         path.insert(path.begin(), curr);
 
@@ -612,10 +616,10 @@ private:
                         // Here i need to switch from the previous adj matrix to the one required after
                         // the bridge is crossed
                         auto new_target_bridge = goal->target_bridge[crossed_bridges];
-                        RCLCPP_INFO(this->get_logger(),"[%d]->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", name_space_id,
-                                                crossed_bridges+1, tot_bridges,
-                                                new_target_bridge.v1, new_target_bridge.c1, new_target_bridge.r1,
-                                                new_target_bridge.v2, new_target_bridge.c2, new_target_bridge.r2, new_target_bridge.length);
+                        // RCLCPP_INFO(this->get_logger(),"[%d]->Move to target BRIDGE %d/%d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", name_space_id,
+                        //                         crossed_bridges+1, tot_bridges,
+                        //                         new_target_bridge.v1, new_target_bridge.c1, new_target_bridge.r1,
+                        //                         new_target_bridge.v2, new_target_bridge.c2, new_target_bridge.r2, new_target_bridge.length);
 
                     
                         target = moveToBridge(new_target_bridge);

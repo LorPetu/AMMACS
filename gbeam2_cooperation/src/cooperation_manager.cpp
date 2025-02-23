@@ -133,6 +133,8 @@ private:
   // Parameters variables
   int N_robot;
   double wifi_range;
+  float exp_distance = 2.0;
+  double dist_scaling = 10.0; 
 
   // Storage of external information 
   gbeam2_interfaces::msg::GlobalMap::SharedPtr stored_Graph;
@@ -149,7 +151,7 @@ private:
 
   double gamma=0.5;
 
-  bool recursive=false;
+  bool start_track_clusters = false;
 
 
   //Navigation variables
@@ -157,6 +159,10 @@ private:
   int start=-1, curr=-1, target=-1;
   // Global clusters
   gbeam2_interfaces::msg::GraphClusterNode start_cl, curr_cl, target_cl; 
+
+  double curr_best_reward = -1.0;
+  int new_target = -1;
+  gbeam2_interfaces::msg::GraphClusterNode new_target_cl;
 
 
   std::vector<gbeam2_interfaces::msg::Status> last_status;
@@ -315,148 +321,272 @@ private:
         
     }
 
-  void mergedGraphCallback(const std::shared_ptr<gbeam2_interfaces::msg::GlobalMap> global_map_received){
-    // This function creates the clusters layer graph considering all the cluster of all the map in global map
-    // and it's executed every new updates of the global map.
-    // To make easier processing all the cluster are added and id remapped from 0 to total size of clusters
-    // in global map. cluster_l2g_index[n][i]=j is a vector of unordered map to obtain the j id of global cluster
-    // of cluster i of robot n. 
-    // It enables the decision making in NavigationCallback()   
-    auto& prev_stored_Graph = stored_Graph;
+  std::string getGoalStatus(){
+    auto status = current_goal_handle_->get_status();
+    std::string status_str;
+    switch (status) {
+        case action_msgs::msg::GoalStatus::STATUS_UNKNOWN:
+            status_str = "STATUS_UNKNOWN";
+            break;
+        case action_msgs::msg::GoalStatus::STATUS_ACCEPTED:
+            status_str = "STATUS_ACCEPTED";
+            break;
+        case action_msgs::msg::GoalStatus::STATUS_EXECUTING:
+            status_str = "STATUS_EXECUTING";
+            break;
+        case action_msgs::msg::GoalStatus::STATUS_CANCELING:
+            status_str = "STATUS_CANCELING";
+            break;
+        case action_msgs::msg::GoalStatus::STATUS_SUCCEEDED:
+            status_str = "STATUS_SUCCEEDED";
+            break;
+        case action_msgs::msg::GoalStatus::STATUS_CANCELED:
+            status_str = "STATUS_CANCELED";
+            break;
+        case action_msgs::msg::GoalStatus::STATUS_ABORTED:
+            status_str = "STATUS_ABORTED";
+            break;
+        default:
+            status_str = "UNKNOWN_STATUS";
+            break;
+    }
+    return status_str;
+}
+
+  bool isClusterConnected(const gbeam2_interfaces::msg::GraphClusterNode& cluster, const std::vector<std::vector<float>>& adj_matrix) {
+    int curr_check = cluster_l2g_index[cluster.belong_to][cluster.cluster_id];
+    auto curr_row = adj_matrix[curr_check];
+
+    for (size_t i = 0; i < curr_row.size(); i++) {
+        if (i != curr_check && curr_row[i] > 0.0) {
+            if (GlobalClusters.clusters[i].total_gain >= 0.0) {
+                return true; // Found a connection
+            }
+        }
+    }
+
+    return false; // No connections found
+  }
+
+  void mergedGraphCallback(const std::shared_ptr<gbeam2_interfaces::msg::GlobalMap> global_map_received) {
+
+    // Save previous versions of the graphs and clusters
+    auto prev_stored_Graph = stored_Graph;
+    auto prev_GlobalClusters = GlobalClusters;
+    auto prev_mapping = cluster_l2g_index;
+
+    if(!prev_GlobalClusters.clusters.empty()){
+      start_track_clusters = true;
+    }
 
     stored_Graph = global_map_received;
     int req_robot_id = stored_Graph->last_updater;
     auto& graph_received = stored_Graph->map[req_robot_id];
-    //RCLCPP_INFO(this->get_logger(), "Received global Map last updated by robot%d",req_robot_id);
-    bool new_nodes=false;
-    int curr_tot_global_gain=0;
-       
+    bool new_nodes = false;
+    int curr_tot_global_gain = 0;
+
     GlobalClusters.clusters.clear();
+    std::vector<gbeam2_interfaces::msg::GraphClusterNode> new_clusters;
 
     // Calculate total size needed for global array
     size_t totalSize = 0;
-    int offset_index=0;
+    int offset_index = 0;
     for (int i = 0; i < N_robot; i++) {
         totalSize += stored_Graph->map[i].cluster_graph.clusters.size();
-
         auto to_add = stored_Graph->map[i].cluster_graph.clusters;
-
-        GlobalClusters.clusters.insert( GlobalClusters.clusters.end(), to_add.begin(), to_add.end() );  
-        cluster_l2g_index[i].clear();   
+        GlobalClusters.clusters.insert(GlobalClusters.clusters.end(), to_add.begin(), to_add.end());
+        cluster_l2g_index[i].clear();
     }
-
-    // RCLCPP_INFO(this->get_logger(),"Global Cluster size: %d - Clusters of 0 = %d - Clusters of 1 = %d",GlobalClusters.clusters.size()
-    //   ,stored_Graph->map[0].cluster_graph.clusters.size(),stored_Graph->map[1].cluster_graph.clusters.size());
 
     std::vector<std::vector<float>> global_adj_matrix(GlobalClusters.clusters.size(), std::vector<float>(GlobalClusters.clusters.size(), -1.0));
     std::vector<std::vector<int>> number_of_bridges(GlobalClusters.clusters.size(), std::vector<int>(GlobalClusters.clusters.size(), 0));
-
-    bool should_decrease = false;  // Flag to start decreasing min_unexpl_size
 
     for (int i = 0; i < GlobalClusters.clusters.size(); i++) {
         auto& cl_i = GlobalClusters.clusters[i];
         computeClusterProperties2(cl_i);  // Compute properties of the cluster
 
+        // Track revelant changes
+        if(start_track_clusters && cl_i.nodes.size()>min_unexpl_size){
+          auto& prev_i = prev_GlobalClusters.clusters[prev_mapping[cl_i.belong_to][cl_i.cluster_id]];
+
+          if (cl_i.nodes.size() != prev_i.nodes.size() || cl_i.total_gain > prev_i.total_gain) {
+            RCLCPP_INFO(this->get_logger(),"[%d]CHANGE IN CLUSTER: (C%d R%d) size: %d->%d tot_gain %.2f->%.2f",name_space_id,
+                                                    cl_i.cluster_id,cl_i.belong_to,prev_i.nodes.size(),cl_i.nodes.size(),prev_i.total_gain,cl_i.total_gain);
+
+              new_clusters.push_back(cl_i);
+          }
+
+        }     
+        
         curr_tot_global_gain += cl_i.total_gain;
         cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id] = i;
     }
 
-    //for (int i = 0; i < N_robot; i++) {printUnorderedMap(this->get_logger(),cluster_l2g_index[i],"mapped for robot"+std::to_string(i));}
-    
     // Edges between clusters of the same robots
-    for(int i=0; i<GlobalClusters.clusters.size(); i++){
-      auto& cl_i = GlobalClusters.clusters[i];
-      int N = stored_Graph->map[cl_i.belong_to].cluster_graph.clusters.size();
+    for (int i = 0; i < GlobalClusters.clusters.size(); i++) {
+        auto& cl_i = GlobalClusters.clusters[i];
+        int N = stored_Graph->map[cl_i.belong_to].cluster_graph.clusters.size();
 
-      for(int j=i;j<GlobalClusters.clusters.size(); j++){
-        auto& cl_j = GlobalClusters.clusters[j];
-        if(cl_i.belong_to==cl_j.belong_to){
-          auto local_index = cl_i.cluster_id*N+cl_j.cluster_id;
-          if (local_index >= stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data.size()) {
-              // RCLCPP_ERROR(this->get_logger(), "Out-of-bounds access in length_matrix.data at index %d", local_index);
-          }
+        for (int j = i; j < GlobalClusters.clusters.size(); j++) {
+            auto& cl_j = GlobalClusters.clusters[j];
+            if (cl_i.belong_to == cl_j.belong_to) {
+                auto local_index = cl_i.cluster_id * N + cl_j.cluster_id;
+                if (local_index >= stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data.size()) {
+                    // RCLCPP_ERROR(this->get_logger(), "Out-of-bounds access in length_matrix.data at index %d", local_index);
+                }
 
-          auto el = stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data[local_index];
-
-          // Compute euclidean distance between expl_centroid
-          float dist_ij = dist(cl_i.expl_centroid,cl_j.expl_centroid);
-
-          global_adj_matrix[i][j] = (el>1e-4) ? dist_ij : -1.0;
-         
-          global_adj_matrix[j][i] = global_adj_matrix[i][j];  
-        }else{
-          // Bridges
-          global_adj_matrix[j][i] = -1.0;
+                auto el = stored_Graph->map[cl_i.belong_to].cluster_graph.length_matrix.data[local_index];
+                float dist_ij = dist(cl_i.expl_centroid, cl_j.expl_centroid);
+                global_adj_matrix[i][j] = (el > 1e-4) ? dist_ij : -1.0;
+                global_adj_matrix[j][i] = global_adj_matrix[i][j];
+            } else {
+                global_adj_matrix[j][i] = -1.0;
+            }
         }
-      }
     }
 
-
-    // RCLCPP_INFO(this->get_logger(),"Starting processing bridges...");
     // Edges between clusters of the different robots
-    for(auto& bridge : stored_Graph->map[req_robot_id].cluster_graph.bridges){
-      int i_gl = cluster_l2g_index[bridge.r1][bridge.c1]; 
-      int j_gl = cluster_l2g_index[bridge.r2][bridge.c2];
-      auto& cl_i = GlobalClusters.clusters[i_gl];
-      auto& cl_j = GlobalClusters.clusters[j_gl];
+    for (auto& bridge : stored_Graph->map[req_robot_id].cluster_graph.bridges) {
+        int i_gl = cluster_l2g_index[bridge.r1][bridge.c1];
+        int j_gl = cluster_l2g_index[bridge.r2][bridge.c2];
+        auto& cl_i = GlobalClusters.clusters[i_gl];
+        auto& cl_j = GlobalClusters.clusters[j_gl];
 
-      number_of_bridges[i_gl][j_gl] +=1;
+        number_of_bridges[i_gl][j_gl] += 1;
 
-      // RCLCPP_INFO(this->get_logger(),"Checking connection %d - %d n_bridges: %d",i_gl,j_gl, number_of_bridges[i_gl][j_gl]);
+        auto& bridge_end_i = stored_Graph->map[bridge.r1].nodes[bridge.v1];
+        auto& bridge_end_j = stored_Graph->map[bridge.r2].nodes[bridge.v2];
 
-      auto& bridge_end_i = stored_Graph->map[bridge.r1].nodes[bridge.v1];
-      auto& bridge_end_j = stored_Graph->map[bridge.r2].nodes[bridge.v2];
-      // Compute euclidean distance between expl_centroid considering the bridges
+        // Check if the bridge's endpoints are still belonging to the same clusters
+        // And update bridge attributes with corresponding cluster ids
+        if(bridge_end_i.cluster_id != bridge.c1 || bridge_end_j.cluster_id != bridge.c2){
+          
+          bridge.c1 = bridge_end_i.cluster_id;
+          bridge.c2 = bridge_end_j.cluster_id;
 
-      float dist_ij = dist(cl_i.expl_centroid,bridge_end_i) + bridge.length + dist(cl_j.expl_centroid,bridge_end_j);
+          int i_gl = cluster_l2g_index[bridge_end_i.belong_to][bridge_end_i.cluster_id];
+          int j_gl = cluster_l2g_index[bridge_end_j.belong_to][bridge_end_j.cluster_id];
+          auto& cl_i = GlobalClusters.clusters[i_gl];
+          auto& cl_j = GlobalClusters.clusters[j_gl];
+        }
+        
+        float dist_ij = dist(cl_i.expl_centroid, bridge_end_i) + bridge.length + dist(cl_j.expl_centroid, bridge_end_j);
+        auto prev_dist = (global_adj_matrix[i_gl][j_gl] < 0.0) ? INF : global_adj_matrix[i_gl][j_gl];
 
-      auto prev_dist = (global_adj_matrix[i_gl][j_gl]<0.0) ? INF : global_adj_matrix[i_gl][j_gl];
+        global_adj_matrix[i_gl][j_gl] = (dist_ij < prev_dist) ? dist_ij : prev_dist;
+        global_adj_matrix[j_gl][i_gl] = global_adj_matrix[i_gl][j_gl];
 
-      // RCLCPP_INFO(this->get_logger(), "prev_dist: %.2f, dist_ij: %.2f", prev_dist, dist_ij);
-
-      
-      global_adj_matrix[i_gl][j_gl] = (dist_ij < prev_dist) ? dist_ij : prev_dist;
-      global_adj_matrix[j_gl][i_gl] = global_adj_matrix[i_gl][j_gl];
-
-      if(global_adj_matrix[i_gl][j_gl]==INF){
-        RCLCPP_WARN(this->get_logger(),"BRIDGE id: %d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ", 
-                                                            bridge.id,
-                                                            bridge.v1, bridge.c1, bridge.r1,
-                                                            bridge.v2, bridge.c2, bridge.r2, bridge.length);
-      }
-      
+        if (global_adj_matrix[i_gl][j_gl] == INF) {
+            RCLCPP_WARN(this->get_logger(), "BRIDGE id: %d from (n: %d cl: %d of R%d ) to (n: %d cl: %d of R%d) length %.2f ",
+                        bridge.id, bridge.v1, bridge.c1, bridge.r1, bridge.v2, bridge.c2, bridge.r2, bridge.length);
+        }
     }
 
     GlobalClusters.bridges = stored_Graph->map[req_robot_id].cluster_graph.bridges;
-    // RCLCPP_INFO(this->get_logger(),"Size of bridges in Global Clusters: %d",GlobalClusters.bridges.size());
     GlobalClusters.adj_matrix = matrix2GraphAdj(global_adj_matrix);
 
-    //printMatrix(this->get_logger(),global_adj_matrix);
+    // Check if the current cluster is still connected
+    if (start_track_clusters && !isClusterConnected(curr_cl, global_adj_matrix)) {
+        RCLCPP_WARN(this->get_logger(), "Current cluster would be disconnected. Aborting update.");
+        stored_Graph = prev_stored_Graph;
+        GlobalClusters = prev_GlobalClusters;
+        cluster_l2g_index = prev_mapping;
+        return;
+    }
 
     clusters_pub_->publish(GlobalClusters);
 
-    if(curr_tot_global_gain>0.0){
-      prev_clusters_size = GlobalClusters.clusters.size();
-      tot_global_gain = curr_tot_global_gain;
-      // Check if a goal is currently executing
-      if (current_goal_handle_)
-      {
-        auto status = current_goal_handle_->get_status();
-        if (status == action_msgs::msg::GoalStatus::STATUS_ACCEPTED ||
-            status == action_msgs::msg::GoalStatus::STATUS_EXECUTING)
-        {
-            RCLCPP_WARN(this->get_logger(), "A goal is already executing. Not sending a new goal.");
-            return;
-        }else{
-          RCLCPP_WARN(this->get_logger(), "No goal is executing, recompute a new target cluster");
-          navigationCallback(false);
-        }
+    // Handle dynamic changes in the Cluster Graph Layer
+
+    if(start_track_clusters && new_clusters.size()>0 && start!=-1){
+      RCLCPP_INFO(this->get_logger(),"[%d]NEW CLUSTERS: At least %d has relevant changes!",name_space_id,new_clusters.size());
+
+      int best_cl_id = -1;
+      std::vector<int> best_path;
+      gbeam2_interfaces::msg::GraphClusterNode best_cl;
+      double best_new_reward = -1.0;
+      int skip = name_space_id;
+
+      for(auto& cl_i:new_clusters){
+
+          int i = cluster_l2g_index[cl_i.belong_to][cl_i.cluster_id];
+          
+          auto [path, distance] = (i!=start) ? dijkstraWithAdjandPath(GlobalClusters,start,i) : std::make_pair(std::vector<int>{start}, getInnerDistance(start_cl));
+          RCLCPP_INFO(this->get_logger(),"[%d]->%d: (C%d R%d) - path: %d - dist %.2f - tot_gain: %.2f - unexpl nodes: %d",name_space_id,
+                                                     i,cl_i.cluster_id,cl_i.belong_to, path.size(),distance,cl_i.total_gain,cl_i.unexplored_nodes.size());
+          
+          if(path.size()>0){
+
+            double dist_from_agent = std::accumulate(last_status.begin(), last_status.end(), 0.0,
+                                      [cl_i,skip](double sum, const gbeam2_interfaces::msg::Status& status) {
+                                          if(status.robot_id==skip) return sum;
+                                          geometry_msgs::msg::PointStamped p;
+                                          p.point.x = status.last_known_target.pose.position.x;
+                                          p.point.y = status.last_known_target.pose.position.y;
+                                          p.point.z = status.last_known_target.pose.position.z;
+                                          
+                                          //status.connection_status[name_space_id]*
+                                          return sum + dist(cl_i.centroid,p); 
+                                      });
+
+
+            double reward_avg = (cl_i.total_gain/cl_i.unexplored_nodes.size()) / pow(distance,exp_distance);
+            
+            //RCLCPP_INFO(this->get_logger(),"BEST CLUSTER: CLUSTER: %d - average reward: %.2f - distance %.2f - total_gain: %.2f - number of unexplored nodes: %d",
+                                                    // i, reward_avg,distance,cl_i.total_gain,cl_i.unexplored_nodes.size());
+            double cost = gamma*reward_avg + (1-gamma)*dist_scaling*dist_from_agent;
+
+            RCLCPP_INFO(this->get_logger(),"[%d]->%d: (C%d R%d) - agent_dist: %.2f - reward_avg: %.2f - cost: %.2f - gamma: %.2f",name_space_id,
+                                                    i,cl_i.cluster_id,cl_i.belong_to,dist_from_agent,reward_avg,cost,gamma);
+            if(cost>best_new_reward){
+              best_cl_id = i;
+              best_cl = cl_i;
+              best_path = path;
+              best_new_reward = cost;
+              
+            }
+          }
       }
 
-      
-    }else{
-      RCLCPP_INFO_ONCE(this->get_logger(),"ZERO TOT GLOBAL GAIN, exploration completed");
-    }
+      if(best_new_reward>curr_best_reward){ // && target_cl.belong_to!=new_target_cl.belong_to && target_cl.cluster_id!=new_target_cl.cluster_id
+        //curr_best_reward = best_new_reward;
+        //curr = best_cl_id;
+        RCLCPP_INFO(this->get_logger(),"[%d]CHANGE IN CLUSTER: (C%d R%d) Could be a better target! starting from START %d->(C%d R%d)",name_space_id,
+                                                    best_cl.cluster_id,best_cl.belong_to, start,start_cl.cluster_id,start_cl.belong_to);
+
+        RCLCPP_INFO(this->get_logger(),"[%d]current_goal_handle_ is %s",name_space_id,current_goal_handle_?"true":"false");
+
+        if(current_goal_handle_){
+          std::string status = getGoalStatus();
+          RCLCPP_INFO(this->get_logger(), "Current goal status: %s", status.c_str());
+          if ( status == "STATUS_ACCEPTED" || status == "STATUS_EXECUTING") {
+            try
+            { 
+              action_client_->async_cancel_goal(current_goal_handle_);
+              RCLCPP_WARN(this->get_logger(), "Cancel the current goal");
+            }
+             catch (const std::exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "Exception in mergedCallback: %s", e.what());
+            } catch (...) {
+                RCLCPP_ERROR(this->get_logger(), "Unknown exception in mergedCallback.");
+            }
+            
+            
+
+            
+            RCLCPP_WARN(this->get_logger(), "No goal is executing, recompute a new target cluster");
+            return;
+          } else {
+            RCLCPP_WARN(this->get_logger(), "No goal is executing, recompute a new target cluster");
+            
+            //navigationCallback(false);
+          }
+        }
+        
+        
+        
+      }
+          }
 
 
   }
@@ -615,8 +745,7 @@ private:
     // Get the best cluster to explored based on the one in which i am
     // Here we should avoid to get access to occupied cluster from "status" topic
     
-    float exp_distance = 2.0;
-    double dist_scaling = 10.0; 
+
     double best_reward =-1.0;
     int best_cluster_id=-1;
     std::vector<int> best_path;
@@ -686,6 +815,7 @@ private:
 
     // If yes, verify if is there a better cluster to explore, based on average and total gain
     // avoiding clusters occupied by other
+    curr_best_reward = best_reward;
 
     return std::make_pair(best_cluster_id, best_path);
 
@@ -916,12 +1046,57 @@ private:
 
   }
 
+  void sendTarget(int new_target,int best_cl_id, gbeam2_interfaces::msg::GraphClusterNode best_cl,std::vector<int>& clusters_to_send){
+    bool AreaDivision_isrequired = false;
+    
+    if(new_target!=best_cl_id){
+        // NEW TARGET
+        if(best_cl.belong_to!=name_space_id){
+          
+          target = best_cl_id;
+          target_cl = best_cl;
+          
+          RCLCPP_INFO(this->get_logger(),"[%d]+++ AREA DIVISION REQUIRED for selected cluster of robot%d with id: %d",name_space_id,GlobalClusters.clusters[target].belong_to, target);
+          
+          AreaDivision_isrequired = true;
+
+          // Here I should ask for area Division client and validate target
+
+          send_goal(clusters_to_send,target_cl);
+          
+        }else{          
+          target = best_cl_id;
+          target_cl = best_cl;
+          RCLCPP_INFO(this->get_logger(),"[%d]+++ Select cluster of mine with id: %d",name_space_id,target);
+          
+
+          send_goal(clusters_to_send,target_cl);
+          
+        }
+      }else{
+        RCLCPP_INFO(this->get_logger(),"[%d]++ Mantain last selected id: %d",name_space_id,target);
+        send_goal(clusters_to_send,target_cl);
+      }
+      
+      
+    
+
+    // If the selected current belong to an other robot:
+    // PAIRWISE AREA DIVISION 
+    // Client and service call to be pairwise syncronized 
+
+    if(AreaDivision_isrequired){
+
+    }
+  }
+
   
 
   // Action routines
 
   void goal_response_callback(const rclcpp_action::ClientGoalHandle<Task>::SharedPtr &goal_handle)
-  {
+  {   
+    current_goal_handle_ = goal_handle;
       if (!goal_handle)
       {
           RCLCPP_ERROR(this->get_logger(), "Goal was rejected by the server");
@@ -950,7 +1125,7 @@ private:
 
 
   void result_callback(const rclcpp_action::ClientGoalHandle<Task>::WrappedResult &result){
-
+      bool is_canceled = false;
       switch (result.code)
       {
       case rclcpp_action::ResultCode::SUCCEEDED:
@@ -962,6 +1137,7 @@ private:
           break;
       case rclcpp_action::ResultCode::CANCELED:
           RCLCPP_ERROR(this->get_logger(), "Goal was canceled");
+          is_canceled = true;
           break;
       default:
           RCLCPP_ERROR(this->get_logger(), "Unknown result code");
@@ -971,7 +1147,7 @@ private:
       // Reset current goal handle after result
       current_goal_handle_.reset();
 
-      navigationCallback(!result.result->task_completed);
+      navigationCallback((is_canceled) ? false : !result.result->task_completed);
   }
 
   void send_goal(std::vector<int> clusters_ids, gbeam2_interfaces::msg::GraphClusterNode cluster_task){
@@ -1026,6 +1202,7 @@ private:
         std::bind(&CooperationNode::result_callback, this, std::placeholders::_1);
 
     action_client_->async_send_goal(goal_msg, send_goal_options);
+  
   }
 
   
