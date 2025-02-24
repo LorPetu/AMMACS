@@ -7,8 +7,6 @@ from std_srvs.srv import Trigger
 from shapely.geometry import Point
 from shapely.ops import unary_union
 from gbeam2_interfaces.msg import *
-from gbeam2_interfaces.srv import *
-from gbeam2_interfaces.action import *
 from nav_msgs.msg import Odometry 
 import math
 import numpy as np
@@ -50,6 +48,7 @@ class ExplorationAnalyzer(Node):
         # Subscribers with namespace support
         self.create_subscription(Graph, f"{self.namespace}/gbeam/reachability_graph", self.graph_callback, 1)
         self.create_subscription(GlobalMap, f"{self.namespace}/gbeam/merged_graph", self.global_callback, 1)
+        self.create_subscription(GraphUpdate, f"{self.namespace}/external_nodes", self.external_nodes_callback, 1)
         self.create_subscription(Odometry, f"{self.namespace}/odom", self.odomCallback, 1)
 
         # Service for exploration timing
@@ -68,6 +67,16 @@ class ExplorationAnalyzer(Node):
         self.null_expl_nodes = []
         self.pos_vert = Vertex()
         self.start_pos = None
+
+        # Initialize variables for tracking message intervals
+        self.last_received_time = None
+        self.intervals = []
+        self.average_update_size   = 0.0
+        self.tot_updates_received = 0
+
+        # Initialize variables for tracking graph size
+        self.graph_size_data = []
+        self.graph_size_time_data = []  # 2D array to store [total_size_nodes, nanoseconds]
 
 
         # Additional variable for GBEAM 2 robots config 
@@ -169,7 +178,13 @@ class ExplorationAnalyzer(Node):
         df.to_csv(LOG_FILE, index=False)
         #self.get_logger().info(f"Cell updated successfully for BAG_NAME '{bag_name}', Column '{column_name}'.")
 
-    
+    # def track_graph_size(self):
+    #     """Track the number of nodes in the graph and the elapsed time."""
+    #     if self.timer_active:
+    #         elapsed_time = (self.get_clock().now() - self.start_time).nanoseconds
+    #         num_nodes = len(self.graph_data.nodes)
+    #         self.graph_size_time_data.append([num_nodes, elapsed_time])
+    #         self.get_logger().info(f"Tracked graph size: {num_nodes} nodes at {elapsed_time} nanoseconds")
 
 
     def start_timer_callback(self, request, response):
@@ -177,6 +192,8 @@ class ExplorationAnalyzer(Node):
         if not self.timer_active:
             self.start_time = self.get_clock().now()
             self.timer_active = True
+            # self.graph_size_data = []
+            # self.graph_size_time_data = []
             #self.get_logger().info("Exploration timer started (ROS time).")
         response.success = True
         return response
@@ -248,17 +265,22 @@ class ExplorationAnalyzer(Node):
         if not self.timer_active:
             self.start_time = self.get_clock().now()
             self.timer_active = True
+            # self.graph_size_data = []
+            # self.graph_size_time_data = []
             #self.get_logger().info("Exploration timer started (ROS time).")
 
         if hasattr(self, 'graph_data') and self.N_robots is not None and (self.N_robots == 1 or (self.N_robots == 2 and self.CONFIG == "GBEAM")):
             # Compare with previous graph
             self.catchGraphChange(self.graph_data, graph)
-            
 
-        
 
         # Store the current graph as the new previous state
         self.graph_data = graph
+
+        # Track graph size and time
+        # self.track_graph_size()
+
+    
 
     def external_graph_callback(self, ext_graph: Graph):
         """Process graph data to analyze exploration per agent and detect changes."""
@@ -272,6 +294,33 @@ class ExplorationAnalyzer(Node):
 
         # Store the current graph as the new previous state
         self.external_graph_data = ext_graph
+
+    def external_nodes_callback(self, msg: GraphUpdate):
+        """Callback for external nodes topic to track message intervals."""
+        current_time = self.get_clock().now()
+
+        self.tot_updates_received += 1
+
+        self.average_update_size = ((self.average_update_size * (self.tot_updates_received - 1)) + len(msg.new_nodes)) / self.tot_updates_received
+
+        self.get_logger().info(f"Received {len(msg.new_nodes)} nodes from external nodes topic. Average: {self.average_update_size:.2f}")
+
+        if self.last_received_time is not None:
+            interval = (current_time - self.last_received_time).nanoseconds
+            self.intervals.append(interval)
+            self.get_logger().info(f"Interval: {interval} nanoseconds")
+
+        self.last_received_time = current_time
+
+    def compute_average_interval(self):
+        """Compute the average interval between received messages in seconds."""
+        if not self.intervals:
+            return 0.0
+
+        total_interval = sum(self.intervals)
+        average_interval = total_interval / len(self.intervals)
+        average_interval_seconds = average_interval / 1e9  # Convert nanoseconds to seconds
+        return average_interval_seconds
 
 
 
@@ -331,6 +380,22 @@ class ExplorationAnalyzer(Node):
                             N_overlapping += 1
                             
         return N_overlapping
+    
+    # def process_graph_size_data(self):
+    #     """Process the graph size data to compute the number of nodes at each 10% step."""
+    #     if not self.graph_size_time_data:
+    #         self.get_logger().warning("No graph size data to process.")
+    #         return
+
+    #     total_time = self.graph_size_time_data[-1][1]
+    #     step_time = total_time / 10
+    #     graph_size_at_steps = []
+
+    #     for step in range(1, 11):
+    #         target_time = step * step_time
+    #         closest_data_point = min(self.graph_size_time_data, key=lambda x: abs(x[1] - target_time))
+    #         graph_size_at_steps.append(closest_data_point[0])
+    #         self.get_logger().info(f"Step {step * 10}%: {closest_data_point[0]} nodes at {closest_data_point[1]} nanoseconds")
 
 
 
@@ -368,41 +433,43 @@ class ExplorationAnalyzer(Node):
             cluster_avg_size = cluster_avg_size / total_nodes_in_clusters
         
 
-
-        self.update_cell_in_csv(self.bag_name,"NODES",tot_nodes)
-        self.update_cell_in_csv(self.bag_name,"EDGES",tot_edges)
-        self.update_cell_in_csv(self.bag_name,"EDGE_DENSITY",edge_density)
-        self.update_cell_in_csv(self.bag_name,"CLUSTERS",tot_clusters)
-        self.update_cell_in_csv(self.bag_name,"EXPLORED_N", len(self.explored_nodes))
+        self.update_cell_in_csv(self.bag_name, "NODES", f"{tot_nodes:.2f}")
+        self.update_cell_in_csv(self.bag_name, "EDGES", f"{tot_edges:.2f}")
+        self.update_cell_in_csv(self.bag_name, "EDGE_DENSITY", f"{edge_density:.2f}")
+        self.update_cell_in_csv(self.bag_name, "CLUSTERS", f"{tot_clusters:.2f}")
+        self.update_cell_in_csv(self.bag_name, "EXPLORED_N", f"{len(self.explored_nodes):.2f}")
 
         count = 0
         if self.CONFIG == "GBEAM":
-            # Belong_to attribute is only available in MAGEAM configuration
             count = len(self.null_expl_nodes)
-        else:        
+        else:
             for n in self.null_expl_nodes:
                 if n.belong_to == self.robot_index:
-                    count +=1
-        
-        self.update_cell_in_csv(self.bag_name,"INSIDE_N", count)
+                    count += 1
 
-        # CLUSTERS_MIN_2	CLUSTERS_MIN_1	CLUSTERS_AVG_SIZE
-        self.update_cell_in_csv(self.bag_name,"CLUSTERS_MIN_2", cluster_2_size)
-        self.update_cell_in_csv(self.bag_name,"CLUSTERS_MIN_1", cluster_1_size)
-        self.update_cell_in_csv(self.bag_name,"CLUSTERS_AVG_SIZE", cluster_avg_size)
+        self.update_cell_in_csv(self.bag_name, "INSIDE_N", f"{count:.2f}")
 
-        self.get_logger().info(f"STARTING POS pos x:{self.start_pos.x:.2} y:{self.start_pos.y:.2}")
-        self.update_cell_in_csv(self.bag_name,"POS_X",self.start_pos.x)
-        self.update_cell_in_csv(self.bag_name,"POS_Y",self.start_pos.y)
+        self.update_cell_in_csv(self.bag_name, "CLUSTERS_MIN_2", f"{cluster_2_size:.2f}")
+        self.update_cell_in_csv(self.bag_name, "CLUSTERS_MIN_1", f"{cluster_1_size:.2f}")
+        self.update_cell_in_csv(self.bag_name, "CLUSTERS_AVG_SIZE", f"{cluster_avg_size:.2f}")
 
+        self.get_logger().info(f"STARTING POS pos x:{self.start_pos.x:.2f} y:{self.start_pos.y:.2f}")
+        self.update_cell_in_csv(self.bag_name, "POS_X", f"{self.start_pos.x:.2f}")
+        self.update_cell_in_csv(self.bag_name, "POS_Y", f"{self.start_pos.y:.2f}")
 
-        self.update_cell_in_csv(self.bag_name,"GRAPH_COVERAGE",self.compute_union_area(self.graph_data.nodes, 0.25))
+        self.update_cell_in_csv(self.bag_name, "GRAPH_COVERAGE", f"{self.compute_union_area(self.graph_data.nodes, 0.25):.2f}")
 
         if self.CONFIG == "GBEAM" and self.N_robots == 2:
             self.global_map.map[self.robot_index] = self.graph_data
             self.global_map.map[1 if self.robot_index == 0 else 0] = self.external_graph_data
 
-        self.update_cell_in_csv(self.bag_name,"OVERLAP_N",self.computeOverlappingNodes())
+        self.update_cell_in_csv(self.bag_name, "OVERLAP_N", f"{self.computeOverlappingNodes():.2f}")
+
+        average_interval = self.compute_average_interval()
+        self.update_cell_in_csv(self.bag_name, "UPDATE_T", f"{average_interval:.2f}")
+
+        # Process graph size data
+        # self.process_graph_size_data()
         
 
 
