@@ -606,8 +606,13 @@ private:
 
   double getInnerDistance(gbeam2_interfaces::msg::GraphClusterNode cl){
     double max_dist = 0.25;
+
+    double exploring_dist  = dist(cl.expl_centroid,robot_pos);
+
+    // cl.unexplored_nodes.size()*(max_dist/cl.nodes.size())
+   
     
-    return cl.unexplored_nodes.size()*(max_dist/cl.nodes.size());
+    return exploring_dist;
 
   }
 
