@@ -4,9 +4,10 @@ from datetime import datetime
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.actions import DeclareLaunchArgument, LogInfo, IncludeLaunchDescription, ExecuteProcess, TimerAction,OpaqueFunction,GroupAction
+from launch.actions import DeclareLaunchArgument, LogInfo, IncludeLaunchDescription, ExecuteProcess, TimerAction,OpaqueFunction,GroupAction, RegisterEventHandler
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, SetRemap
+from launch.event_handlers import OnProcessExit, OnShutdown
 import os
 import re
 from launch.substitutions import PythonExpression
@@ -119,6 +120,14 @@ def generate_launch_description():
             parameters=[{'use_sim_time': False}]        
     )
 
+    # Event handler to shut down the launch process when both nodes have exited
+    shutdown_event_handler = RegisterEventHandler(
+        OnProcessExit(
+                target_action=watch_dog,
+                on_exit=[LogInfo(msg="Both analyzer and watchdog have stopped. Shutting down launch..."), launch.actions.Shutdown()]
+            )
+    )
+
     # Add actions
     ld.add_action(num_robots_arg)
     ld.add_action(name_space_arg)
@@ -128,6 +137,7 @@ def generate_launch_description():
     ld.add_action(OpaqueFunction(function=select_bag_file))  # Select bag file dynamically
     ld.add_action(OpaqueFunction(function=launch_setup))  # Launch ground nodes dynamically
     ld.add_action(watch_dog)
+    ld.add_action(shutdown_event_handler)
 
 
     return ld

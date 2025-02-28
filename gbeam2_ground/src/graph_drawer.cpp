@@ -72,6 +72,8 @@ private:
     int name_space_id;
     int N_robot;
 
+    double mapping_z = 0.25;
+
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr graph_nodes_pub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr graph_normals_pub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr graph_edges_pub;
@@ -94,30 +96,26 @@ private:
         return rgb_float;
     }
 
-    float getClusterColorRGB(int cluster_id, int robot_id) {
+    float getClusterColorRGB(int cluster_id, int robot_id, int total_clusters) {
         if (cluster_id == -2) return packRGB(0.5, 0.5, 0.5);  // Obstacle color
         if (cluster_id == -1) return packRGB(0.5, 0.5, 0.5);  // Not clustered color
 
-        std::srand(cluster_id + robot_id * 1000);  
-        float r = static_cast<float>(std::rand() % 256) / 255.0;
-        float g = static_cast<float>(std::rand() % 256) / 255.0;
-        float b = static_cast<float>(std::rand() % 256) / 255.0;
+        float hue = 360.0f * (static_cast<float>(cluster_id + robot_id * total_clusters) / static_cast<float>(N_robot * total_clusters));
+        float r, g, b;
+        HSVtoRGB(hue, 1.0f, 1.0f, r, g, b);  // Full saturation and value for bright colors
 
         return packRGB(r, g, b);
     }
 
-
-    std_msgs::msg::ColorRGBA getClusterColor(int cluster_id, int robot_id) {
+    std_msgs::msg::ColorRGBA getClusterColor(int cluster_id, int robot_id, int total_clusters) {
         std_msgs::msg::ColorRGBA color;
         if (cluster_id == -2) {  // Special case for obstacles
             color.r = 0.5, color.g = 0.5, color.b = 0.5, color.a = 1;
             return color;
         }
-        
-        std::srand(cluster_id + robot_id * 1000); // Ensure different robots have distinct colors
-        color.r = static_cast<float>(std::rand() % 256) / 255.0;
-        color.g = static_cast<float>(std::rand() % 256) / 255.0;
-        color.b = static_cast<float>(std::rand() % 256) / 255.0;
+
+        float hue = 360.0f * (static_cast<float>(cluster_id + robot_id * total_clusters) / static_cast<float>(N_robot * total_clusters));
+        HSVtoRGB(hue, 1.0f, 1.0f, color.r, color.g, color.b);  // Full saturation and value for bright colors
         color.a = 1.0;
 
         return color;
@@ -152,8 +150,24 @@ private:
 
         //initialize edge_markers for /graph_edges
         visualization_msgs::msg::Marker edges_markers;
-        edges_markers.ns = "graph_drawer", edges_markers.id = 1, edges_markers.type = 5, edges_markers.scale.x = 0.005 * scaling;
+        edges_markers.ns = "graph_drawer", edges_markers.id = 1, edges_markers.type = 5, edges_markers.scale.x = 0.01 * scaling;
+        edges_markers.action =0;
+        edges_markers.points.clear();
+        edges_markers.colors.clear();
         // edges_markers.pose   could be initialized, actually not needed, ony gives a warning
+
+        std_msgs::msg::ColorRGBA custom_color;
+        custom_color.r = 0.5;
+        custom_color.g = 0.1;
+        custom_color.b = 0.7;
+        custom_color.a = 1.0;
+
+        std_msgs::msg::ColorRGBA black_color;
+        float gray_value = static_cast<float>(name_space_id) / static_cast<float>(N_robot);
+        black_color.r = gray_value;
+        black_color.g = gray_value;
+        black_color.b = gray_value;
+        black_color.a = 0.65;
 
         
         // DEBUG CLOUDPOINT 
@@ -198,13 +212,13 @@ private:
             auto node = graph_ptr->nodes[n];
             *iter_x = node.x;
             *iter_y = node.y;
-            *iter_z = node.z;
+            *iter_z = mapping_z;
             *iter_gain = node.gain;
             *iter_node_id = node.id;
             *iter_is_obstacle = node.is_obstacle;
             *iter_is_connected = node.is_completely_connected;
             *iter_cluster_id = node.is_obstacle ? -2: node.cluster_id; 
-            *iter_rgb = getClusterColorRGB(node.cluster_id, name_space_id);  // Assign color
+            *iter_rgb = getClusterColorRGB(node.cluster_id, name_space_id,graph_ptr->cluster_graph.clusters.size());  // Assign color
             
             ++iter_x; ++iter_y; ++iter_z;
             ++iter_cluster_id; ++iter_node_id; ++iter_gain;
@@ -213,7 +227,7 @@ private:
            
 
             // Assign cluster color
-            std_msgs::msg::ColorRGBA cluster_color = getClusterColor(node.cluster_id, name_space_id);
+            std_msgs::msg::ColorRGBA cluster_color = getClusterColor(node.cluster_id, name_space_id,graph_ptr->cluster_graph.clusters.size());
 
             // Create a text marker for each node
             visualization_msgs::msg::Marker text_marker;
@@ -224,7 +238,7 @@ private:
             text_marker.action = visualization_msgs::msg::Marker::ADD;
             text_marker.pose.position.x = node.x;
             text_marker.pose.position.y = node.y;
-            text_marker.pose.position.z = node.z + 0.1; // Offset the text slightly above the node
+            text_marker.pose.position.z = mapping_z + 0.1; // Offset the text slightly above the node
             text_marker.scale.z = 0.1 * scaling; // Text height
             text_marker.color.r = 1.0;
             text_marker.color.g = 1.0;
@@ -233,12 +247,14 @@ private:
             text_marker.text = std::to_string(n);
             text_markers.markers.push_back(text_marker);
 
+
+
             // Create Normals for
             if (node.is_obstacle)
             {
                 geometry_msgs::msg::Point w, z;
-                w.x = node.x, w.y = node.y, w.z = node.z;
-                z.x = node.x, z.y = node.y, z.z = node.z;
+                w.x = node.x, w.y = node.y, w.z = mapping_z;
+                z.x = node.x, z.y = node.y, z.z = mapping_z;
                 w.x += 0.5 * normal_length * node.obstacle_normal.x;
                 w.y += 0.5 * normal_length * node.obstacle_normal.y;
                 z.x -= 0.5 * normal_length * node.obstacle_normal.x;
@@ -252,40 +268,27 @@ private:
 
         //add edges
         for (int e = 0; e < graph_ptr->edges.size(); e++)
-        {
-            edges_markers.points.push_back(vertex2point(graph_ptr->nodes[graph_ptr->edges[e].v1]));
-            edges_markers.points.push_back(vertex2point(graph_ptr->nodes[graph_ptr->edges[e].v2]));
-            if (graph_ptr->edges[e].is_boundary)
-            {
-                edges_markers.colors.push_back(boundary_color);
-                edges_markers.colors.push_back(boundary_color);
-            }
-            else
-            {
-                if (graph_ptr->edges[e].is_walkable)
-                {
-                    edges_markers.colors.push_back(walkable_color);
-                    edges_markers.colors.push_back(walkable_color);
-                }
-                else
-                {
-                    edges_markers.colors.push_back(inside_color);
-                    edges_markers.colors.push_back(inside_color);
-                }
-            }
+        {   
+            auto& node_i = graph_ptr->nodes[graph_ptr->edges[e].v1]; node_i.z = mapping_z-0.03;
+            auto& node_j = graph_ptr->nodes[graph_ptr->edges[e].v2]; node_j.z = mapping_z-0.03;
+            edges_markers.points.push_back(vertex2point(node_i));
+            edges_markers.points.push_back(vertex2point(node_j));
+
+            edges_markers.colors.push_back(black_color);
+            edges_markers.colors.push_back(black_color);
         }
 
         for (auto& bridge : graph_ptr->cluster_graph.bridges){
             if(bridge.belong_to==name_space_id){
-                gbeam2_interfaces::msg::Vertex centr_i = graph_ptr->nodes[bridge.v1];
-                gbeam2_interfaces::msg::Vertex centr_j;
+                gbeam2_interfaces::msg::Vertex centr_i = graph_ptr->nodes[bridge.v1]; centr_i.z = mapping_z-0.03;
+                gbeam2_interfaces::msg::Vertex centr_j; centr_j.z = mapping_z-0.03;
                 centr_j.x = centr_i.x + bridge.length*bridge.direction.x;
                 centr_j.y = centr_i.y + bridge.length*bridge.direction.y;
                 edges_markers.points.push_back(vertex2point(centr_i));
                 edges_markers.points.push_back(vertex2point(centr_j));
 
-                edges_markers.colors.push_back(walkable_color);
-                edges_markers.colors.push_back(walkable_color);                
+                edges_markers.colors.push_back(custom_color);
+                edges_markers.colors.push_back(custom_color);
             }
         }
 
@@ -358,8 +361,21 @@ private:
             HSVtoRGB(hue, 1.0f, 1.0f, r, g, b); // Convert HSV to RGB (1.0f for full saturation and value)
             robot_color[i].r = r; robot_color[i].g = g; robot_color[i].b = b; robot_color[i].a = 1.0;
         }
-        
-        
+
+        std_msgs::msg::ColorRGBA black_color;
+        float gray_value = static_cast<float>(name_space_id) / static_cast<float>(N_robot);
+        black_color.r = gray_value;
+        black_color.g = gray_value;
+        black_color.b = gray_value;
+        black_color.a = 0.65;
+
+        std::vector<int> cluster_count(N_robot, 0);
+
+        for (const auto& cluster : cluster_graph_ptr->clusters) {
+            if (cluster.belong_to >= 0 && cluster.belong_to < N_robot) {
+                cluster_count[cluster.belong_to]++;
+            }
+        }
 
         // Draw each centroid of the cluster
         int i=0;
@@ -381,7 +397,7 @@ private:
             marker.scale.y = (cluster.nodes.size()*0.03 < min_cluster_size)? min_cluster_size : cluster.nodes.size()*0.03;
             marker.scale.z = (cluster.total_gain * gain_scale< min_cluster_size) ? min_cluster_size : cluster.total_gain * gain_scale;
 
-            marker.color = getClusterColor(cluster.cluster_id,cluster.belong_to);//(cluster.unexplored_nodes.empty()) ? white : robot_color[cluster.belong_to];
+            marker.color = getClusterColor(cluster.cluster_id,cluster.belong_to, cluster_count[cluster.belong_to]);//(cluster.unexplored_nodes.empty()) ? white : robot_color[cluster.belong_to];
 
             
 
@@ -425,8 +441,8 @@ private:
                     edges_markers.points.push_back(vertex2point(centr_i));
                     edges_markers.points.push_back(vertex2point(centr_j));
 
-                    edges_markers.colors.push_back(walkable_color);
-                    edges_markers.colors.push_back(walkable_color);
+                    edges_markers.colors.push_back(black_color);
+                    edges_markers.colors.push_back(black_color);
                 }
             }
         }

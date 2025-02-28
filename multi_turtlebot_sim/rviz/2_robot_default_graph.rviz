@@ -6,6 +6,8 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
+        - /Robot1 - Nodes1
+        - /Robot1 - scan1
         - /Marker1
         - /MarkerArray1
         - /Robot0 - Clusters1
@@ -23,7 +25,6 @@ Panels:
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
-      - /TopDownOrtho1
     Name: Views
     Splitter Ratio: 0.5
   - Class: rviz_common/Time
@@ -132,7 +133,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: RGB8
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 4096
@@ -153,7 +154,7 @@ Visualization Manager:
         Value: /robot1/gbeam_visualization/graph_nodes
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -163,10 +164,10 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz_default_plugins/LaserScan
-      Color: 255; 255; 255
+      Color: 255; 255; 0
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 0
@@ -187,7 +188,7 @@ Visualization Manager:
         Value: /robot1/scan
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Class: rviz_default_plugins/Polygon
       Color: 255; 0; 0
@@ -204,7 +205,7 @@ Visualization Manager:
     - Alpha: 1
       Class: rviz_default_plugins/Polygon
       Color: 25; 255; 0
-      Enabled: true
+      Enabled: false
       Name: Robot1 - PolyReach
       Topic:
         Depth: 5
@@ -213,11 +214,11 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot1/gbeam_visualization/poly_reachable
-      Value: true
+      Value: false
     - Alpha: 1
       Class: rviz_default_plugins/Polygon
       Color: 255; 0; 0
-      Enabled: true
+      Enabled: false
       Name: Robot1 - PolyObs
       Topic:
         Depth: 5
@@ -226,7 +227,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot1/gbeam_visualization/poly_obstacles
-      Value: true
+      Value: false
     - Alpha: 1
       Class: rviz_default_plugins/Polygon
       Color: 25; 255; 0
@@ -241,7 +242,7 @@ Visualization Manager:
         Value: /robot0/gbeam_visualization/poly_reachable
       Value: false
     - Class: rviz_default_plugins/Marker
-      Enabled: true
+      Enabled: false
       Name: Robot1 - Edges
       Namespaces:
         {}
@@ -252,7 +253,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot1/gbeam_visualization/graph_edges
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/Marker
       Enabled: false
       Name: Robot0 - Edges
@@ -407,7 +408,7 @@ Visualization Manager:
       Enabled: true
       Name: Robot1 - Clusters
       Namespaces:
-        {}
+        cluster_centroid: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -416,7 +417,7 @@ Visualization Manager:
         Value: /robot1/gbeam_visualization/clusters/centroids
       Value: true
     - Class: rviz_default_plugins/Marker
-      Enabled: true
+      Enabled: false
       Name: Robot1 - ClustersEdges
       Namespaces:
         {}
@@ -427,7 +428,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot1/gbeam_visualization/clusters/edges
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 255; 255; 255
@@ -483,13 +484,13 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 174.5310516357422
-      Target Frame: <Fixed Frame>
+      Scale: 138.48382568359375
+      Target Frame: world
       Value: TopDownOrtho (rviz_default_plugins)
       X: 0
       Y: 0
     Saved:
-      - Angle: -1.5799994468688965
+      - Angle: 0
         Class: rviz_default_plugins/TopDownOrtho
         Enable Stereo Rendering:
           Stereo Eye Separation: 0.05999999865889549
@@ -497,13 +498,13 @@ Visualization Manager:
           Swap Stereo Eyes: false
           Value: false
         Invert Z Axis: false
-        Name: TopDownOrtho
+        Name: Use this for screenshot
         Near Clip Distance: 0.009999999776482582
-        Scale: 108.03849029541016
-        Target Frame: <Fixed Frame>
+        Scale: 162
+        Target Frame: world
         Value: TopDownOrtho (rviz_default_plugins)
-        X: 0.09501346945762634
-        Y: -0.5807371735572815
+        X: 0
+        Y: 0
 Window Geometry:
   Displays:
     collapsed: false

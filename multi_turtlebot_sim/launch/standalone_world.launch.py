@@ -50,7 +50,7 @@ def generate_launch_description():
     world_name = LaunchConfiguration('world_name')
     world_name_arg = DeclareLaunchArgument(
           'world_name',
-          default_value='turtlebot3_dqn_stage4EMPTY.world', #dqn_stage4EMPTY
+          default_value='turtlebot3_dqn_stage4HOUSE.world',#'turtlebot3_house.world',#'turtlebot3_dqn_stage4.world', #'turtlebot3_world.world',#turtlebot3_dqn_stage4UNEVEN.world', #dqn_stage4EMPTY
           description='SDF world file name. [empty_world.world or turtlebot3_world.world]')
 
     # Includes gazebo_ros launch for gazebo

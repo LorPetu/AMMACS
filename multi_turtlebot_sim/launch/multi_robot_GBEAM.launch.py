@@ -8,9 +8,9 @@ from launch.actions import DeclareLaunchArgument, LogInfo, IncludeLaunchDescript
 from launch.substitutions import LaunchConfiguration
 import os
 #/home/lor/GBEAM2_MultiUAV/src/multi_turtlebot_sim/launch/spawn_cooperative_agent.launch.py
-def launch_spawn_gbeam2(namespace, lidar, x_pose, y_pose,num_robot,bitmap,robot_index):
+def launch_spawn_gbeam2(namespace, lidar, x_pose, y_pose,num_robot,bitmap,robot_index, robot_value):
 
-    if num_robot != 1:
+    if robot_value != 1:
         launch =  IncludeLaunchDescription(
                     PythonLaunchDescriptionSource(
                         os.path.join(get_package_share_directory('multi_turtlebot_sim'), 'launch', 'spawn_old_GBEAM_agent.launch.py')
@@ -136,7 +136,7 @@ def generate_launch_description():
             actions.append(TimerAction(
                 period=offset + idx*4.0,  # Delay to avoid simultaneous launches
                 actions=[
-                    launch_spawn_gbeam2(namespace, lidar_height, x_pose, y_pose, num_robots,bitmap,idx),
+                    launch_spawn_gbeam2(namespace, lidar_height, x_pose, y_pose, num_robots,bitmap,idx, num_robots_value),
                 ]
             ))
 

@@ -21,7 +21,12 @@ PARENT_FOLDER = "/home/lor/rosbags"  # Replace with the desired parent folder pa
 MAP_SIZES ={
     "turtlebot3_dqn_stage4EMPTY.world" : 21.13,
     "turtlebot3_dqn_stage4.world": 21.13,
+    "turtlebot3_dqn_stage4UNEVEN.world":20.48,
+    "turtlebot3_dqn_stage4HOUSE.world": 30.0,
+    "turtlebot3_world.world": 50.0    
 }
+
+#src/multi_turtlebot_sim/worlds/turtlebot3_dqn_stage4HOUSE.world src/multi_turtlebot_sim/worlds/turtlebot3_dqn_stage4UNEVEN.world
 
 class ExplorationAnalyzer(Node):
     def __init__(self):
@@ -93,11 +98,17 @@ class ExplorationAnalyzer(Node):
         """compute distance between 2 vertices"""
         return math.sqrt((v.x - u.x) ** 2 + (v.y - u.y) ** 2)
     
-    @staticmethod
-    def compute_union_area(nodes, radius):
+    def compute_union_area(self, nodes, radius):
         coordinates = [(node.x, node.y) for node in nodes]  # Extract coordinates from nodes
         circles = [Point(x, y).buffer(radius) for x, y in coordinates]  # Create circle geometries
         union_shape = unary_union(circles)  # Compute the union of all circles
+
+        if self.CONFIG == "GBEAM" and self.N_robots == 2:
+            null_coordinates = [(node.x, node.y) for node in self.null_expl_nodes]
+            null_circles = [Point(x, y).buffer(radius) for x, y in null_coordinates]
+            null_union_shape = unary_union(null_circles)
+            union_shape = union_shape.difference(null_union_shape)  # Subtract null nodes area
+
         return union_shape.area  # Get the area of the union
 
 
@@ -439,6 +450,13 @@ class ExplorationAnalyzer(Node):
         self.update_cell_in_csv(self.bag_name, "CLUSTERS", f"{tot_clusters:.2f}")
         self.update_cell_in_csv(self.bag_name, "EXPLORED_N", f"{len(self.explored_nodes):.2f}")
 
+        filtered_explored_nodes = [node for node in self.explored_nodes if node.belong_to == 0]
+        self.update_cell_in_csv(self.bag_name, "EXPLORED_N_0", f"{len(filtered_explored_nodes):.2f}")
+
+        filtered_explored_nodes = [node for node in self.explored_nodes if node.belong_to == 1]
+        self.update_cell_in_csv(self.bag_name, "EXPLORED_N_1", f"{len(filtered_explored_nodes):.2f}")
+
+
         count = 0
         if self.CONFIG == "GBEAM":
             count = len(self.null_expl_nodes)
@@ -457,7 +475,7 @@ class ExplorationAnalyzer(Node):
         self.update_cell_in_csv(self.bag_name, "POS_X", f"{self.start_pos.x:.2f}")
         self.update_cell_in_csv(self.bag_name, "POS_Y", f"{self.start_pos.y:.2f}")
 
-        self.update_cell_in_csv(self.bag_name, "GRAPH_COVERAGE", f"{self.compute_union_area(self.graph_data.nodes, 0.25):.2f}")
+        self.update_cell_in_csv(self.bag_name, "GRAPH_COVERAGE", f"{self.compute_union_area(nodes=self.graph_data.nodes, radius=0.25):.2f}")
 
         if self.CONFIG == "GBEAM" and self.N_robots == 2:
             self.global_map.map[self.robot_index] = self.graph_data
@@ -478,6 +496,9 @@ class ExplorationAnalyzer(Node):
         num_explored_nodes = len(self.explored_nodes)
         self.get_logger().info(f"Total explored nodes: {num_explored_nodes}")
         self.get_logger().info(f"Total explorable nodes: {tot_nodes - len(self.null_expl_nodes)}")
+
+        # Stop spinning the node
+        rclpy.shutdown()
 
 def main(args=None):
     rclpy.init(args=args)
