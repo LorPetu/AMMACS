@@ -1,1 +1,2 @@
-# GBEAM2_Multi_UAV
+# AMMACS
+> Autonomous Mapping for Multi-Agent Collaborative Systems
